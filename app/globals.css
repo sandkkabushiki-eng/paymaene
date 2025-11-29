@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 0, 0, 0;
+  --background-start-rgb: 214, 219, 220;
+  --background-end-rgb: 255, 255, 255;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --foreground-rgb: 255, 255, 255;
+    --background-start-rgb: 0, 0, 0;
+    --background-end-rgb: 0, 0, 0;
+  }
+}
+
+body {
+  color: rgb(0, 0, 0);
+  background: rgb(249, 250, 251);
+}
+
+/* 日付入力欄のカレンダーピッカーを表示 */
+input[type="date"] {
+  position: relative;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 1;
+  position: absolute;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  z-index: 2;
+}
+
+input[type="date"]::-webkit-inner-spin-button {
+  opacity: 1;
+  cursor: pointer;
+}
+
