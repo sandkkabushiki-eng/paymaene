@@ -1,10 +1,14 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
-import { getAllAssets, addAsset, updateAsset, deleteAsset } from '@/lib/firestore';
+import { getAllAssets, addAsset, updateAsset, deleteAsset } from '@/lib/supabase-db';
 import { Asset } from '@/lib/types';
 import { format } from 'date-fns';
+import { Plus, Wallet, Edit2, Trash2, X, Globe, Building2 } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 export default function AssetsPage() {
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -75,179 +79,257 @@ export default function AssetsPage() {
     setShowForm(true);
   };
 
+  // 通貨ごとの合計を計算
+  const totalByCurrency = assets.reduce((acc, asset) => {
+    const currency = asset.currency || 'JPY';
+    if (!acc[currency]) acc[currency] = 0;
+    acc[currency] += asset.currentBalance;
+    return acc;
+  }, {} as Record<string, number>);
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-3xl font-bold">資産管理</h1>
-          <Link href="/" className="text-blue-600 hover:underline">← ホームに戻る</Link>
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">資産管理</h1>
+          <p className="text-muted-foreground mt-1">
+            銀行口座、投資信託、現金などの資産を管理します
+          </p>
         </div>
+        <Button onClick={() => {
+          setEditingAsset(null);
+          setShowForm(true);
+        }}>
+          <Plus className="mr-2 h-4 w-4" />
+          資産を追加
+        </Button>
+      </div>
 
-        <div className="bg-white p-6 rounded-lg shadow mb-6">
-          <div className="flex justify-end mb-4">
-            <button
-              onClick={() => {
-                setEditingAsset(null);
-                setShowForm(!showForm);
-              }}
-              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-            >
-              {showForm ? 'キャンセル' : '新規追加'}
-            </button>
-          </div>
-
-          {showForm && (
-            <form onSubmit={handleSubmit} className="border-t pt-4 mt-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block mb-1">資産種別 *</label>
-                  <input
-                    type="text"
-                    name="assetType"
-                    defaultValue={editingAsset?.assetType || ''}
-                    required
-                    className="w-full border rounded px-3 py-2"
-                    placeholder="例: 銀行口座、投資信託、現金"
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1">名称 *</label>
-                  <input
-                    type="text"
-                    name="name"
-                    defaultValue={editingAsset?.name || ''}
-                    required
-                    className="w-full border rounded px-3 py-2"
-                    placeholder="例: 三菱UFJ銀行 普通預金"
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1">所属</label>
-                  <input
-                    type="text"
-                    name="affiliation"
-                    defaultValue={editingAsset?.affiliation || ''}
-                    className="w-full border rounded px-3 py-2"
-                    placeholder="例: 個人、MyFans事業"
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1">現在残高 *</label>
-                  <input
-                    type="number"
-                    name="currentBalance"
-                    defaultValue={editingAsset?.currentBalance || ''}
-                    required
-                    className="w-full border rounded px-3 py-2"
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1">通貨</label>
-                  <select
-                    name="currency"
-                    defaultValue={editingAsset?.currency || 'JPY'}
-                    className="w-full border rounded px-3 py-2"
-                  >
-                    <option value="JPY">JPY (円)</option>
-                    <option value="USD">USD (ドル)</option>
-                    <option value="EUR">EUR (ユーロ)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block mb-1">更新日 *</label>
-                  <input
-                    type="date"
-                    name="updateDate"
-                    defaultValue={editingAsset?.updateDate instanceof Date 
-                      ? format(editingAsset.updateDate, 'yyyy-MM-dd')
-                      : editingAsset?.updateDate || format(new Date(), 'yyyy-MM-dd')}
-                    required
-                    className="w-full border rounded px-3 py-2"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <label className="block mb-1">メモ</label>
-                  <textarea
-                    name="memo"
-                    defaultValue={editingAsset?.memo || ''}
-                    className="w-full border rounded px-3 py-2"
-                    rows={3}
-                  />
-                </div>
+      {/* 合計カード */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {Object.entries(totalByCurrency).map(([currency, total]) => (
+          <Card key={currency} className="card-hover">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">合計 ({currency})</CardTitle>
+              <Wallet className="h-4 w-4 text-blue-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {currency === 'JPY' ? '¥' : currency + ' '}
+                {total.toLocaleString()}
               </div>
-              <div className="mt-4">
-                <button
-                  type="submit"
-                  className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700"
-                >
-                  {editingAsset ? '更新' : '追加'}
-                </button>
-              </div>
-            </form>
-          )}
-        </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
 
-        <div className="bg-white p-6 rounded-lg shadow">
-          <h2 className="text-xl font-semibold mb-4">資産一覧</h2>
+      <Card>
+        <CardHeader>
+          <CardTitle>資産一覧</CardTitle>
+          <CardDescription>登録されている全資産のリスト</CardDescription>
+        </CardHeader>
+        <CardContent>
           {loading ? (
-            <p className="text-gray-500">読み込み中...</p>
+            <div className="flex items-center justify-center h-48 text-muted-foreground">
+              読み込み中...
+            </div>
           ) : assets.length === 0 ? (
-            <p className="text-gray-500">資産データがありません</p>
+            <div className="flex flex-col items-center justify-center h-48 text-muted-foreground gap-2">
+              <div className="p-3 bg-gray-100 rounded-full">
+                <Wallet className="h-6 w-6 text-gray-400" />
+              </div>
+              <p>資産データがありません</p>
+            </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full">
-                <thead>
-                  <tr className="border-b bg-gray-50">
-                    <th className="text-left p-3">資産種別</th>
-                    <th className="text-left p-3">名称</th>
-                    <th className="text-left p-3">所属</th>
-                    <th className="text-right p-3">現在残高</th>
-                    <th className="text-left p-3">通貨</th>
-                    <th className="text-left p-3">更新日</th>
-                    <th className="text-left p-3">メモ</th>
-                    <th className="text-left p-3">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>資産種別</TableHead>
+                    <TableHead>名称</TableHead>
+                    <TableHead>所属</TableHead>
+                    <TableHead className="text-right">現在残高</TableHead>
+                    <TableHead>更新日</TableHead>
+                    <TableHead>メモ</TableHead>
+                    <TableHead className="text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {assets.map((asset) => (
-                    <tr key={asset.id} className="border-b hover:bg-gray-50">
-                      <td className="p-3">{asset.assetType}</td>
-                      <td className="p-3">{asset.name}</td>
-                      <td className="p-3">{asset.affiliation || '-'}</td>
-                      <td className="p-3 text-right">
+                    <TableRow key={asset.id}>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Building2 className="h-4 w-4 text-muted-foreground" />
+                          {asset.assetType}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-medium">{asset.name}</TableCell>
+                      <TableCell>
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                          {asset.affiliation || '未設定'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right font-bold">
                         {asset.currency === 'JPY' ? '¥' : asset.currency + ' '}
                         {asset.currentBalance.toLocaleString()}
-                      </td>
-                      <td className="p-3">{asset.currency}</td>
-                      <td className="p-3">
+                      </TableCell>
+                      <TableCell>
                         {asset.updateDate instanceof Date 
                           ? format(asset.updateDate, 'yyyy/MM/dd')
                           : asset.updateDate}
-                      </td>
-                      <td className="p-3">{asset.memo || '-'}</td>
-                      <td className="p-3">
-                        <button
-                          onClick={() => handleEdit(asset)}
-                          className="text-blue-600 hover:underline mr-2"
-                        >
-                          編集
-                        </button>
-                        <button
-                          onClick={() => handleDelete(asset.id!)}
-                          className="text-red-600 hover:underline"
-                        >
-                          削除
-                        </button>
-                      </td>
-                    </tr>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground max-w-[200px] truncate" title={asset.memo}>
+                        {asset.memo || '-'}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleEdit(asset)}
+                            title="編集"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => handleDelete(asset.id!)}
+                            title="削除"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* モーダルフォーム */}
+      {showForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-lg bg-white rounded-xl shadow-xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between p-6 border-b">
+              <h2 className="text-xl font-semibold">
+                {editingAsset ? '資産を編集' : '資産を追加'}
+              </h2>
+              <button
+                onClick={() => setShowForm(false)}
+                className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            
+            <form onSubmit={handleSubmit} className="p-6">
+              <div className="grid grid-cols-1 gap-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">資産種別 *</label>
+                    <Input
+                      type="text"
+                      name="assetType"
+                      defaultValue={editingAsset?.assetType || ''}
+                      required
+                      placeholder="例: 銀行口座"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">名称 *</label>
+                    <Input
+                      type="text"
+                      name="name"
+                      defaultValue={editingAsset?.name || ''}
+                      required
+                      placeholder="例: 三菱UFJ銀行"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">所属</label>
+                    <Input
+                      type="text"
+                      name="affiliation"
+                      defaultValue={editingAsset?.affiliation || ''}
+                      placeholder="例: 個人、事業"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">通貨</label>
+                    <div className="relative">
+                      <select
+                        name="currency"
+                        defaultValue={editingAsset?.currency || 'JPY'}
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 appearance-none"
+                      >
+                        <option value="JPY">JPY (円)</option>
+                        <option value="USD">USD (ドル)</option>
+                        <option value="EUR">EUR (ユーロ)</option>
+                      </select>
+                      <Globe className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">現在残高 *</label>
+                    <Input
+                      type="number"
+                      name="currentBalance"
+                      defaultValue={editingAsset?.currentBalance || ''}
+                      required
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">更新日 *</label>
+                    <Input
+                      type="date"
+                      name="updateDate"
+                      defaultValue={editingAsset?.updateDate instanceof Date 
+                        ? format(editingAsset.updateDate, 'yyyy-MM-dd')
+                        : editingAsset?.updateDate || format(new Date(), 'yyyy-MM-dd')}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">メモ</label>
+                  <textarea
+                    name="memo"
+                    defaultValue={editingAsset?.memo || ''}
+                    className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    placeholder="備考など"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 mt-8 pt-4 border-t">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowForm(false)}
+                >
+                  キャンセル
+                </Button>
+                <Button type="submit">
+                  {editingAsset ? '更新する' : '追加する'}
+                </Button>
+              </div>
+            </form>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
-

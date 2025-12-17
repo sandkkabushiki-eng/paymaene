@@ -1,6 +1,6 @@
 import Papa from 'papaparse';
 import { Expense } from './types';
-import { addExpense, getExpenses } from './firestore';
+import { addExpense, getExpenses } from './supabase-db';
 
 // CSVファイルをパースして経費データに変換
 export function parseAmexCsv(csvText: string, fileName: string): Expense[] {

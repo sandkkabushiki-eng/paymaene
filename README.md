@@ -4,28 +4,51 @@
 
 ## 技術スタック
 
-- **フロントエンド**: Next.js 14 (App Router), React, TypeScript
-- **データベース**: Firebase Firestore
+- **フロントエンド**: Next.js 15 (App Router), React 18, TypeScript
+- **データベース**: Supabase (PostgreSQL)
 - **スタイリング**: Tailwind CSS
+- **UIコンポーネント**: Radix UI
 - **デプロイ**: Vercel
 
 ## 機能
 
-### 1. 経費管理
+### 1. ダッシュボード
+- 月別売上・経費・利益の推移グラフ（事業別色分け）
+- 事業別売上一覧
+- 最近の経費一覧
+
+### 2. 経費管理
 - 経費の登録・編集・削除
 - CSVファイルからの一括取り込み（AMEX対応）
 - 月別・事業別での絞り込み
 - 重複取り込みの防止
+- 固定費機能（毎月自動反映）
 
-### 2. 利益管理
-- 月次売上の入力（MyFans、非属人人、ココナラ）
+### 3. 利益管理
+- 月次売上の入力（事業別）
 - 経費合計の自動計算
-- 粗利・純利益の自動計算
-- 2025-10から2026-09までの12ヶ月分を管理
+- 粗利・税金・純利益の自動計算
+- 年別での管理
 
-### 3. 資産管理
+### 4. 資産管理
 - 資産の登録・編集・削除
 - 複数通貨対応（JPY、USD、EUR）
+- 通貨別の合計表示
+
+### 5. 収益分配
+- 分配先ごとの分配率・金額設定
+- 事業別の分配管理
+
+### 6. 振り込み管理
+- 月別の振り込み金額一覧
+- 事業別・全事業での集計
+- 経費立て替えの精算
+
+### 7. 設定
+- 事業管理（色設定付き）
+- 支払元・分配先管理
+- 経費カテゴリー管理
+- モデル/部署管理
 
 ## セットアップ
 
@@ -35,26 +58,18 @@
 npm install
 ```
 
-### 2. Firebase設定
+### 2. Supabase設定
 
-1. Firebaseプロジェクトを作成
-2. Firestoreデータベースを有効化
+1. [Supabase](https://supabase.com/)でプロジェクトを作成
+2. `supabase-schema.sql`の内容をSQL Editorで実行
 3. `.env.local`ファイルを作成し、以下の環境変数を設定：
 
 ```env
-NEXT_PUBLIC_FIREBASE_API_KEY=your-api-key
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your-project.appspot.com
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=123456789
-NEXT_PUBLIC_FIREBASE_APP_ID=your-app-id
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-### 3. Firestoreセキュリティルール
-
-`firestore.rules`ファイルをFirebaseコンソールでデプロイしてください。
-
-### 4. ローカル開発サーバーの起動
+### 3. ローカル開発サーバーの起動
 
 ```bash
 npm run dev
@@ -68,49 +83,61 @@ npm run dev
 
 1. GitHubリポジトリにプッシュ
 2. Vercelでプロジェクトをインポート
-3. 環境変数を設定
+3. 環境変数を設定（NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY）
 4. デプロイ
-
-### Firebase Hostingへのデプロイ（オプション）
-
-```bash
-npm run build
-firebase deploy --only hosting
-```
 
 ## データ構造
 
 ### 経費 (expenses)
 - `date`: 日付
 - `month`: 月（"2025-10"形式）
-- `business`: 事業（"MyFans" | "非属人人" | "ココナラ" | "共通"）
-- `paymentSource`: 支払元
+- `business`: 事業名
+- `payment_source`: 支払元
 - `category`: 経費カテゴリ
 - `description`: 内容
 - `amount`: 金額
 - `memo`: メモ
-- `sourceData`: 元データ（ファイル名など）
+- `source_data`: 元データ（ファイル名など）
+- `is_fixed_cost`: 固定費フラグ
+- `fixed_cost_id`: 固定費のID
 
 ### 利益 (profits)
 - `month`: 月（"2025-10"形式）
-- `myfansRevenue`: MyFans売上
-- `hijozokuRevenue`: 非属人人売上
-- `coconalaRevenue`: ココナラ売上
-- `totalRevenue`: 売上合計（自動計算）
-- `totalExpense`: 経費合計（自動計算）
-- `grossProfit`: 粗利（自動計算）
-- `netProfit`: 純利益（自動計算）
+- `revenues`: 事業別売上（JSONB）
+- `total_revenue`: 売上合計
+- `total_expense`: 経費合計
+- `gross_profit`: 粗利
+- `net_profit`: 純利益
 
 ### 資産 (assets)
-- `assetType`: 資産種別
+- `asset_type`: 資産種別
 - `name`: 名称
 - `affiliation`: 所属
-- `currentBalance`: 現在残高
+- `current_balance`: 現在残高
 - `currency`: 通貨
-- `updateDate`: 更新日
+- `update_date`: 更新日
 - `memo`: メモ
+
+### 事業 (businesses)
+- `name`: 事業名
+- `memo`: メモ
+- `color`: テーマカラー
+
+### 収益分配 (revenue_distributions)
+- `business_name`: 事業名
+- `model_name`: モデル名
+- `recipient_name`: 分配先名
+- `distribution_type`: 分配タイプ（percentage/amount）
+- `value`: 値
+
+## セキュリティ
+
+- Supabase Row Level Security (RLS) を使用
+- 環境変数で認証情報を管理
+- クライアントサイドでの直接アクセス（anon key使用）
+
+**注意**: 本番環境では適切なRLSポリシーを設定してください。
 
 ## ライセンス
 
 MIT
-

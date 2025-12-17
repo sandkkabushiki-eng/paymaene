@@ -6,6 +6,7 @@ export interface Business {
   id?: string;
   name: string; // 事業名（例: "MyFans", "非属人人", "ココナラ"など）
   memo: string; // メモ
+  color?: string; // カラーコード（例: "#ff0000"）
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -33,6 +34,8 @@ export interface Expense {
   amount: number; // 金額
   memo: string; // メモ
   sourceData: string; // 元データ（ファイル名など）
+  isFixedCost?: boolean; // 固定費フラグ（毎月かかる経費）
+  fixedCostId?: string; // 固定費の元データID（固定費の場合、元の経費IDを保存）
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -108,4 +111,3 @@ export interface RevenueDistribution {
   createdAt?: Date;
   updatedAt?: Date;
 }
-

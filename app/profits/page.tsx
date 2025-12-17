@@ -1,23 +1,25 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
-import { collection, query, where, getDocs, doc, deleteDoc, updateDoc, addDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { getAllProfits, getProfit, updateProfit, addProfit, deleteProfit, calculateProfitForMonth, calculateProfitsForMonths, getAllBusinesses, getExpenses, getTotalExpenseByMonth } from '@/lib/firestore';
+import { getAllProfits, getProfit, updateProfit, addProfit, deleteProfit, calculateProfitForMonth, getAllBusinesses, getExpenses } from '@/lib/supabase-db';
 import { Profit, Business } from '@/lib/types';
+import { format, subMonths, addMonths } from 'date-fns';
+import { RefreshCw, ChevronDown, ChevronRight, Save, Trash2, TrendingUp, DollarSign, PieChart } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { cn } from '@/lib/utils';
 
 export default function ProfitsPage() {
   const [profits, setProfits] = useState<Profit[]>([]);
   const [loading, setLoading] = useState(true);
-  const [editingProfit, setEditingProfit] = useState<Profit | null>(null);
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [expandedBusiness, setExpandedBusiness] = useState<string | null>(null);
-  // 入力中の値を管理（保存前の一時的な値、nullは空文字列を意味する）
   const [editingValues, setEditingValues] = useState<Record<string, Record<string, number | null>>>({});
-  // 税率（デフォルト20%）
   const [taxRate, setTaxRate] = useState<number>(20);
+  const [startMonth, setStartMonth] = useState<Date>(new Date(new Date().getFullYear(), 0, 1)); // デフォルト: 今年の1月
 
   useEffect(() => {
     loadBusinesses();
@@ -25,50 +27,14 @@ export default function ProfitsPage() {
     loadExpenses();
   }, []);
 
-  // ページがフォーカスされたときにデータを再読み込み（保存した値が反映されるように）
-  useEffect(() => {
-    const handleFocus = () => {
-      // ページがフォーカスされたときにデータを再読み込み
-      loadProfits();
-    };
-
-    window.addEventListener('focus', handleFocus);
-    return () => {
-      window.removeEventListener('focus', handleFocus);
-    };
-  }, []);
-
   const loadProfits = async (): Promise<void> => {
     try {
       setLoading(true);
-      
-      // Firestoreから直接全データを取得
-      const q = query(collection(db!, 'profits'));
-      const querySnapshot = await getDocs(q);
-      
-      const allProfits: Profit[] = querySnapshot.docs.map(docSnap => {
-        const data = docSnap.data();
-        return {
-          id: docSnap.id,
-          month: data.month,
-          revenues: data.revenues || {},
-          totalRevenue: data.totalRevenue || 0,
-          totalExpense: data.totalExpense || 0,
-          grossProfit: data.grossProfit || 0,
-          netProfit: data.netProfit || 0,
-        };
-      });
-      
-      console.log('=== Firestore から読み込んだデータ ===');
-      allProfits.forEach(p => {
-        console.log(`${p.month}:`, p.revenues);
-      });
-      
+      const allProfits = await getAllProfits();
       setProfits(allProfits);
     } catch (error: any) {
       console.error('利益データの読み込みに失敗:', error);
-      const errorMessage = error?.message || 'データの読み込みに失敗しました';
-      alert(`データの読み込みに失敗しました: ${errorMessage}`);
+      alert('データの読み込みに失敗しました');
     } finally {
       setLoading(false);
     }
@@ -92,38 +58,27 @@ export default function ProfitsPage() {
     }
   };
 
-  // 事業ごとの経費合計を計算
   const getBusinessExpenseByMonth = (businessName: string, month: string): number => {
     return expenses
       .filter(expense => expense.business === businessName && expense.month === month)
       .reduce((sum, expense) => sum + expense.amount, 0);
   };
 
-  // 事業ごとの売上合計を計算（表示用、入力中の値も考慮）
   const getBusinessRevenueByMonth = (businessName: string, month: string): number => {
-    // 入力中の値がある場合はそれを優先
     const editingValue = editingValues[month]?.[businessName];
     if (editingValue !== undefined && editingValue !== null) {
       return Number(editingValue);
     }
-    
-    // 保存済みの値を返す
     const profit = profits.find(p => p.month === month);
     return profit?.revenues?.[businessName] || 0;
   };
 
-  // 事業ごとの純利益を計算
-  const getBusinessNetProfitByMonth = (businessName: string, month: string): number => {
-    const revenue = getBusinessRevenueByMonth(businessName, month);
-    const expense = getBusinessExpenseByMonth(businessName, month);
-    return revenue - expense;
-  };
-
+  // 表示する月のリストを生成（開始月から12ヶ月分 + 前後の期間調整機能用）
   const generateMonths = (): string[] => {
     const months = [];
-    const startDate = new Date(2025, 9, 1); // 2025年10月
+    // 開始月から12ヶ月分生成
     for (let i = 0; i < 12; i++) {
-      const date = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
+      const date = addMonths(startMonth, i);
       const year = date.getFullYear();
       const month = String(date.getMonth() + 1).padStart(2, '0');
       months.push(`${year}-${month}`);
@@ -132,8 +87,6 @@ export default function ProfitsPage() {
   };
 
   const handleRevenueChange = (month: string, businessName: string, value: string) => {
-    // 入力中の値を一時的に保存
-    // 空文字列の場合はnull、数値の場合は数値として保存
     const numValue = value === '' ? null : parseFloat(value);
     setEditingValues(prev => ({
       ...prev,
@@ -145,90 +98,37 @@ export default function ProfitsPage() {
   };
 
   const getDisplayValue = (month: string, businessName: string): string => {
-    // 入力中の値があればそれを表示、なければ保存済みの値を表示
     const editingValue = editingValues[month]?.[businessName];
-    
-    // 入力中の値がある場合（undefinedでない場合）
     if (editingValue !== undefined) {
-      if (editingValue === null) {
-        return ''; // 空文字列を意味する
-      }
-      // 0も表示する
+      if (editingValue === null) return '';
       return String(editingValue);
     }
-    
-    // 保存済みの値を表示
     const profit = profits.find(p => p.month === month);
-    if (!profit) {
-      return '';
-    }
-    
+    if (!profit) return '';
     const savedValue = profit.revenues?.[businessName];
-    
-    // undefined、nullの場合は空文字列を返す（0は表示する）
-    if (savedValue === undefined || savedValue === null) {
-      return '';
-    }
-    
-    // 0も含めて表示
+    if (savedValue === undefined || savedValue === null) return '';
     return String(savedValue);
   };
 
   const handleSaveRevenue = async (month: string, businessName: string) => {
-    // 保存ボタンが押されたときに保存
     try {
       const inputValue = editingValues[month]?.[businessName];
-      console.log('=== 保存開始 ===');
-      console.log('month:', month, 'businessName:', businessName, 'inputValue:', inputValue);
-      
-      // 入力値がnullまたはundefinedの場合はスキップ
-      if (inputValue === null || inputValue === undefined) {
-        console.log('入力値がnull/undefinedのため、保存をスキップ');
-        return;
-      }
+      if (inputValue === null || inputValue === undefined) return;
       
       const value = Number(inputValue);
       if (isNaN(value) || value < 0) {
-        alert('0以上の有効な数値を入力してください');
+        alert('有効な数値を入力してください');
         return;
       }
       
-      // 既存データを検索（複数ある場合は全て取得して削除）
-      const q = query(collection(db!, 'profits'), where('month', '==', month));
-      const querySnapshot = await getDocs(q);
-      
-      console.log('検索結果:', querySnapshot.docs.length, '件');
-      
-      // 既存のrevenuesを取得
-      let existingRevenues: Record<string, number> = {};
-      let existingDocId: string | null = null;
-      
-      if (!querySnapshot.empty) {
-        // 複数ドキュメントがある場合は最初の1つを使用し、残りは削除
-        for (let i = 0; i < querySnapshot.docs.length; i++) {
-          const docSnap = querySnapshot.docs[i];
-          if (i === 0) {
-            existingDocId = docSnap.id;
-            existingRevenues = docSnap.data().revenues || {};
-            console.log('既存ドキュメント使用:', existingDocId, existingRevenues);
-          } else {
-            // 重複ドキュメントを削除
-            console.log('重複ドキュメント削除:', docSnap.id);
-            await deleteDoc(doc(db!, 'profits', docSnap.id));
-          }
-        }
-      }
-      
-      // 新しいrevenuesを設定
+      const existingProfit = await getProfit(month);
+      let existingRevenues: Record<string, number> = existingProfit?.revenues || {};
       const updatedRevenues = { ...existingRevenues, [businessName]: value };
-      console.log('更新後のrevenues:', updatedRevenues);
       
-      // 経費合計を計算
       const totalExpense = expenses
         .filter(expense => expense.month === month)
         .reduce((sum, expense) => sum + expense.amount, 0);
       
-      // 売上合計を計算
       const totalRevenue = Object.values(updatedRevenues).reduce((sum, rev) => sum + (rev || 0), 0);
       
       const profitData = {
@@ -238,27 +138,14 @@ export default function ProfitsPage() {
         totalExpense,
         grossProfit: totalRevenue,
         netProfit: totalRevenue - totalExpense,
-        updatedAt: new Date(),
       };
       
-      console.log('保存するデータ:', profitData);
-      
-      if (existingDocId) {
-        // 既存データを更新
-        console.log('既存データを更新:', existingDocId);
-        await updateDoc(doc(db!, 'profits', existingDocId), profitData);
+      if (existingProfit?.id) {
+        await updateProfit(existingProfit.id, profitData);
       } else {
-        // 新規作成
-        console.log('新規データを作成');
-        await addDoc(collection(db!, 'profits'), {
-          ...profitData,
-          createdAt: new Date(),
-        });
+        await addProfit(profitData);
       }
       
-      console.log('=== 保存完了 ===');
-      
-      // 入力中の値をクリア
       setEditingValues(prev => {
         const updated = { ...prev };
         if (updated[month]) {
@@ -270,45 +157,25 @@ export default function ProfitsPage() {
         return updated;
       });
       
-      // Firestoreからデータを再読み込み
       await loadProfits();
     } catch (error: any) {
       console.error('売上データの更新に失敗:', error);
-      const errorMessage = error?.message || '更新に失敗しました';
-      alert(`更新に失敗しました: ${errorMessage}`);
+      alert('更新に失敗しました');
     }
   };
 
   const handleDeleteProfit = async (month: string) => {
-    // 利益データを削除
-    if (!confirm(`${month}の利益データを削除しますか？`)) {
-      return;
-    }
+    if (!confirm(`${month}の利益データを削除しますか？`)) return;
     
     try {
-      // Firestoreから直接削除（重複も含めて全て削除）
-      const q = query(collection(db!, 'profits'), where('month', '==', month));
-      const querySnapshot = await getDocs(q);
-      
-      if (querySnapshot.empty) {
+      const existingProfit = await getProfit(month);
+      if (!existingProfit || !existingProfit.id) {
         alert('削除するデータが見つかりませんでした');
         return;
       }
-      
-      console.log(`${month}: ${querySnapshot.docs.length}件のドキュメントを削除`);
-      
-      for (const docSnap of querySnapshot.docs) {
-        console.log(`削除: ${docSnap.id}`);
-        await deleteDoc(doc(db!, 'profits', docSnap.id));
-      }
-      
-      // ステートからも削除
-      setProfits(prevProfits => prevProfits.filter(p => p.month !== month));
-      alert(`${month}のデータを削除しました`);
-      
-      // データを再読み込み
+      await deleteProfit(existingProfit.id);
       await loadProfits();
-    } catch (error) {
+    } catch (error: any) {
       console.error('利益データの削除に失敗:', error);
       alert('削除に失敗しました');
     }
@@ -326,7 +193,7 @@ export default function ProfitsPage() {
         }
       }
       loadProfits();
-      alert('すべての月の利益を再計算しました');
+      alert('再計算が完了しました');
     } catch (error) {
       console.error('再計算に失敗:', error);
       alert('再計算に失敗しました');
@@ -335,48 +202,66 @@ export default function ProfitsPage() {
     }
   };
 
+  // 期間操作
+  const handlePrevYear = () => setStartMonth(subMonths(startMonth, 12));
+  const handleNextYear = () => setStartMonth(addMonths(startMonth, 12));
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-3xl font-bold text-gray-900">利益管理</h1>
-          <div className="flex gap-4">
-            <button
-              onClick={recalculateAll}
-              className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
-            >
-              再計算
-            </button>
-            <Link href="/" className="text-blue-600 hover:underline">← ホームに戻る</Link>
-          </div>
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">利益管理</h1>
+          <p className="text-muted-foreground mt-1">
+            月ごとの売上、経費、利益を管理します
+          </p>
         </div>
-
-        {/* 税率設定 */}
-        <div className="bg-white p-4 rounded-lg shadow mb-6 flex items-center gap-4">
-          <label className="text-gray-900 font-medium">税率:</label>
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              value={taxRate}
-              onChange={(e) => setTaxRate(Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)))}
-              className="w-20 text-right border rounded px-2 py-1 text-gray-900 bg-white"
-              min={0}
-              max={100}
-            />
-            <span className="text-gray-600">%</span>
-          </div>
-          <span className="text-sm text-gray-500">（粗利に対する税金の割合）</span>
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={recalculateAll} disabled={loading}>
+            <RefreshCw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
+            再計算
+          </Button>
         </div>
+      </div>
 
-        <div className="bg-white p-6 rounded-lg shadow">
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle>利益一覧</CardTitle>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 bg-gray-50 p-2 rounded-md">
+                <span className="text-sm font-medium">税率:</span>
+                <div className="relative">
+                  <Input
+                    type="number"
+                    value={taxRate}
+                    onChange={(e) => setTaxRate(Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)))}
+                    className="w-16 h-8 text-right pr-6"
+                    min={0}
+                    max={100}
+                  />
+                  <span className="absolute right-2 top-1.5 text-sm text-muted-foreground">%</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={handlePrevYear}>
+                  &lt; 前の年
+                </Button>
+                <span className="text-sm font-medium w-32 text-center">
+                  {format(startMonth, 'yyyy年MM月')} 〜
+                </span>
+                <Button variant="outline" size="sm" onClick={handleNextYear}>
+                  次の年 &gt;
+                </Button>
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
           {loading ? (
-            <p className="text-gray-500">読み込み中...</p>
+            <div className="text-center py-12 text-muted-foreground">読み込み中...</div>
           ) : businesses.length === 0 ? (
-            <div className="text-center py-8">
-              <p className="text-gray-500 mb-4">事業が登録されていません</p>
-              <Link href="/settings" className="text-blue-600 hover:underline">
-                設定ページで事業を追加してください
-              </Link>
+            <div className="text-center py-12 text-muted-foreground">
+              事業が登録されていません
             </div>
           ) : (
             <div className="space-y-4">
@@ -384,182 +269,142 @@ export default function ProfitsPage() {
                 const isExpanded = expandedBusiness === business.name;
                 const months = generateMonths();
                 
-                // 事業ごとの合計を計算
-                const totalRevenue = months.reduce((sum, month) => 
-                  sum + getBusinessRevenueByMonth(business.name, month), 0
-                );
-                const totalExpense = months.reduce((sum, month) => 
-                  sum + getBusinessExpenseByMonth(business.name, month), 0
-                );
-                const totalGrossProfit = totalRevenue - totalExpense; // 粗利
-                const totalTax = totalGrossProfit > 0 ? Math.floor(totalGrossProfit * taxRate / 100) : 0; // 税金
-                const totalNetProfit = totalGrossProfit - totalTax; // 純利益
+                // 合計計算
+                const totalRevenue = months.reduce((sum, month) => sum + getBusinessRevenueByMonth(business.name, month), 0);
+                const totalExpense = months.reduce((sum, month) => sum + getBusinessExpenseByMonth(business.name, month), 0);
+                const totalGrossProfit = totalRevenue - totalExpense;
+                const totalTax = totalGrossProfit > 0 ? Math.floor(totalGrossProfit * taxRate / 100) : 0;
+                const totalNetProfit = totalGrossProfit - totalTax;
                 
                 return (
-                  <div key={business.id} className="border rounded-lg overflow-hidden">
+                  <div key={business.id} className="rounded-lg border bg-card text-card-foreground shadow-sm overflow-hidden">
                     <button
                       onClick={() => setExpandedBusiness(isExpanded ? null : business.name)}
-                      className="w-full flex justify-between items-center p-4 bg-gray-50 hover:bg-gray-100 transition text-left"
+                      className="w-full flex items-center justify-between p-4 hover:bg-muted/50 transition-colors"
                     >
-                      <h3 className="text-lg font-semibold text-gray-900">{business.name}</h3>
-                      <div className="flex items-center gap-6">
+                      <div className="flex items-center gap-3">
+                        {isExpanded ? <ChevronDown className="h-5 w-5 text-muted-foreground" /> : <ChevronRight className="h-5 w-5 text-muted-foreground" />}
+                        <span className="font-semibold text-lg">{business.name}</span>
+                      </div>
+                      
+                      <div className="flex items-center gap-8 text-sm">
+                        <div className="text-right hidden md:block">
+                          <div className="text-muted-foreground text-xs mb-0.5">売上</div>
+                          <div className="font-medium">¥{totalRevenue.toLocaleString()}</div>
+                        </div>
+                        <div className="text-right hidden md:block">
+                          <div className="text-muted-foreground text-xs mb-0.5">経費</div>
+                          <div className="font-medium text-red-600">¥{totalExpense.toLocaleString()}</div>
+                        </div>
                         <div className="text-right">
-                          <div className="text-xs text-gray-500">粗利</div>
-                          <div className={`text-sm font-semibold ${
-                            totalGrossProfit >= 0 ? 'text-blue-600' : 'text-red-600'
-                          }`}>
+                          <div className="text-muted-foreground text-xs mb-0.5">粗利</div>
+                          <div className={cn("font-medium", totalGrossProfit >= 0 ? "text-blue-600" : "text-red-600")}>
                             ¥{totalGrossProfit.toLocaleString()}
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="text-xs text-gray-500">税金({taxRate}%)</div>
-                          <div className="text-sm font-semibold text-orange-600">
-                            ¥{totalTax.toLocaleString()}
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-xs text-gray-500">純利益</div>
-                          <div className={`text-lg font-bold ${
-                            totalNetProfit >= 0 ? 'text-green-600' : 'text-red-600'
-                          }`}>
+                          <div className="text-muted-foreground text-xs mb-0.5">純利益</div>
+                          <div className={cn("font-bold text-base", totalNetProfit >= 0 ? "text-green-600" : "text-red-600")}>
                             ¥{totalNetProfit.toLocaleString()}
                           </div>
                         </div>
-                        <svg
-                          className={`w-5 h-5 text-gray-600 transition-transform ${
-                            isExpanded ? 'transform rotate-180' : ''
-                          }`}
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                        </svg>
                       </div>
                     </button>
                     
                     {isExpanded && (
-                      <div className="p-4 border-t">
-                        <div className="overflow-x-auto">
-                          <table className="min-w-full">
-                            <thead>
-                              <tr className="border-b bg-gray-50">
-                                <th className="text-left p-3 text-gray-900">月</th>
-                                <th className="text-right p-3 text-gray-900">売上</th>
-                                <th className="text-right p-3 text-gray-900">経費</th>
-                                <th className="text-right p-3 text-blue-600">粗利</th>
-                                <th className="text-right p-3 text-orange-600">税金</th>
-                                <th className="text-right p-3 font-bold text-green-600">純利益</th>
-                                <th className="text-center p-3 text-gray-900">操作</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {months.map((month) => {
-                                const displayValue = getDisplayValue(month, business.name);
-                                const savedRevenue = getBusinessRevenueByMonth(business.name, month);
-                                const expense = getBusinessExpenseByMonth(business.name, month);
-                                // 表示用の値（入力中なら入力値、そうでなければ保存済み値）
-                                const inputValue = editingValues[month]?.[business.name];
-                                const currentRevenue = inputValue !== undefined && inputValue !== null
-                                  ? Number(inputValue)
-                                  : savedRevenue;
-                                const grossProfit = currentRevenue - expense; // 粗利
-                                const tax = grossProfit > 0 ? Math.floor(grossProfit * taxRate / 100) : 0; // 税金
-                                const netProfit = grossProfit - tax; // 純利益
-                                const hasUnsavedChanges = inputValue !== undefined;
-                                
-                                return (
-                                  <tr key={month} className="border-b hover:bg-gray-50">
-                                    <td className="p-3 font-semibold text-gray-900">{month}</td>
-                                    <td className="p-3">
-                                      <div className="flex items-center gap-2">
-                                        <input
+                      <div className="border-t animate-accordion-down">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-muted/50">
+                              <TableHead className="w-[100px]">月</TableHead>
+                              <TableHead className="text-right">売上 (入力)</TableHead>
+                              <TableHead className="text-right">経費</TableHead>
+                              <TableHead className="text-right text-blue-600">粗利</TableHead>
+                              <TableHead className="text-right text-orange-600">税金</TableHead>
+                              <TableHead className="text-right font-bold text-green-600">純利益</TableHead>
+                              <TableHead className="text-center w-[100px]">操作</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {months.map((month) => {
+                              const displayValue = getDisplayValue(month, business.name);
+                              const savedRevenue = getBusinessRevenueByMonth(business.name, month);
+                              const expense = getBusinessExpenseByMonth(business.name, month);
+                              const inputValue = editingValues[month]?.[business.name];
+                              const currentRevenue = inputValue !== undefined && inputValue !== null ? Number(inputValue) : savedRevenue;
+                              const grossProfit = currentRevenue - expense;
+                              const tax = grossProfit > 0 ? Math.floor(grossProfit * taxRate / 100) : 0;
+                              const netProfit = grossProfit - tax;
+                              const hasUnsavedChanges = inputValue !== undefined;
+                              
+                              return (
+                                <TableRow key={month}>
+                                  <TableCell className="font-medium">{month}</TableCell>
+                                  <TableCell>
+                                    <div className="flex items-center justify-end gap-2">
+                                      <div className="relative w-32">
+                                        <span className="absolute left-2 top-1.5 text-xs text-muted-foreground">¥</span>
+                                        <Input
                                           type="number"
                                           value={displayValue}
                                           onChange={(e) => handleRevenueChange(month, business.name, e.target.value)}
-                                          onFocus={(e) => {
-                                            // フォーカス時に0や空の場合は空文字列にする
-                                            if (e.target.value === '0' || e.target.value === '') {
-                                              e.target.select();
-                                            }
-                                          }}
-                                          className="w-full text-right border rounded px-2 py-1 text-gray-900 bg-white"
+                                          className="h-8 text-right pl-5 pr-2"
                                           placeholder="0"
                                         />
-                                        {hasUnsavedChanges && (
-                                          <button
-                                            onClick={() => {
-                                              if (confirm(`${month}の売上を保存しますか？`)) {
-                                                handleSaveRevenue(month, business.name);
-                                              }
-                                            }}
-                                            className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 whitespace-nowrap"
-                                            title="保存"
-                                          >
-                                            保存
-                                          </button>
-                                        )}
                                       </div>
-                                    </td>
-                                    <td className="p-3 text-right text-gray-900">
-                                      ¥{expense.toLocaleString()}
-                                    </td>
-                                    <td className={`p-3 text-right ${
-                                      grossProfit >= 0 ? 'text-blue-600' : 'text-red-600'
-                                    }`}>
-                                      ¥{grossProfit.toLocaleString()}
-                                    </td>
-                                    <td className="p-3 text-right text-orange-600">
-                                      ¥{tax.toLocaleString()}
-                                    </td>
-                                    <td className={`p-3 text-right font-bold ${
-                                      netProfit >= 0 ? 'text-green-600' : 'text-red-600'
-                                    }`}>
-                                      ¥{netProfit.toLocaleString()}
-                                    </td>
-                                    <td className="p-3 text-center">
-                                      <div className="flex items-center justify-center gap-2">
-                                        {hasUnsavedChanges && (
-                                          <span className="text-xs text-orange-600">未保存</span>
-                                        )}
-                                        <button
-                                          onClick={() => handleDeleteProfit(month)}
-                                          className="text-red-600 hover:text-red-800 text-xs px-2 py-1 rounded hover:bg-red-50"
-                                          title="データを削除"
+                                      {hasUnsavedChanges && (
+                                        <Button
+                                          size="sm"
+                                          onClick={() => handleSaveRevenue(month, business.name)}
+                                          className="h-8 w-8 p-0"
+                                          title="保存"
                                         >
-                                          削除
-                                        </button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                              <tr className="border-t-2 bg-gray-50 font-semibold">
-                                <td className="p-3 text-gray-900">合計</td>
-                                <td className="p-3 text-right text-gray-900">
-                                  ¥{totalRevenue.toLocaleString()}
-                                </td>
-                                <td className="p-3 text-right text-gray-900">
-                                  ¥{totalExpense.toLocaleString()}
-                                </td>
-                                <td className={`p-3 text-right ${
-                                  totalGrossProfit >= 0 ? 'text-blue-600' : 'text-red-600'
-                                }`}>
-                                  ¥{totalGrossProfit.toLocaleString()}
-                                </td>
-                                <td className="p-3 text-right text-orange-600">
-                                  ¥{totalTax.toLocaleString()}
-                                </td>
-                                <td className={`p-3 text-right font-bold ${
-                                  totalNetProfit >= 0 ? 'text-green-600' : 'text-red-600'
-                                }`}>
-                                  ¥{totalNetProfit.toLocaleString()}
-                                </td>
-                                <td className="p-3"></td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        </div>
+                                          <Save className="h-4 w-4" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="text-right text-red-600">
+                                    ¥{expense.toLocaleString()}
+                                  </TableCell>
+                                  <TableCell className={cn("text-right font-medium", grossProfit >= 0 ? "text-blue-600" : "text-red-600")}>
+                                    ¥{grossProfit.toLocaleString()}
+                                  </TableCell>
+                                  <TableCell className="text-right text-orange-600">
+                                    ¥{tax.toLocaleString()}
+                                  </TableCell>
+                                  <TableCell className={cn("text-right font-bold", netProfit >= 0 ? "text-green-600" : "text-red-600")}>
+                                    ¥{netProfit.toLocaleString()}
+                                  </TableCell>
+                                  <TableCell className="text-center">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleDeleteProfit(month)}
+                                      className="h-8 w-8 p-0 text-muted-foreground hover:text-red-600"
+                                      title="データを削除"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                            <TableRow className="bg-muted/50 font-semibold">
+                              <TableCell>合計</TableCell>
+                              <TableCell className="text-right">¥{totalRevenue.toLocaleString()}</TableCell>
+                              <TableCell className="text-right text-red-600">¥{totalExpense.toLocaleString()}</TableCell>
+                              <TableCell className={cn("text-right", totalGrossProfit >= 0 ? "text-blue-600" : "text-red-600")}>
+                                ¥{totalGrossProfit.toLocaleString()}
+                              </TableCell>
+                              <TableCell className="text-right text-orange-600">¥{totalTax.toLocaleString()}</TableCell>
+                              <TableCell className={cn("text-right", totalNetProfit >= 0 ? "text-green-600" : "text-red-600")}>
+                                ¥{totalNetProfit.toLocaleString()}
+                              </TableCell>
+                              <TableCell></TableCell>
+                            </TableRow>
+                          </TableBody>
+                        </Table>
                       </div>
                     )}
                   </div>
@@ -567,9 +412,8 @@ export default function ProfitsPage() {
               })}
             </div>
           )}
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
-

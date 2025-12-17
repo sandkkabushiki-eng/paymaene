@@ -1,11 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
-import { collection, query, getDocs, doc, deleteDoc, updateDoc, addDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { getAllBusinesses, getAllPaymentSources, getExpenses } from '@/lib/firestore';
-import { Business, PaymentSource } from '@/lib/types';
+import { getAllBusinesses, getAllPaymentSources, getExpenses, getAllRecipients, getAllRevenueDistributions, addRevenueDistribution, updateRevenueDistribution, deleteRevenueDistribution, getAllProfits } from '@/lib/supabase-db';
+import { Business, PaymentSource, Recipient } from '@/lib/types';
+import { Plus, Trash2, Edit2, ArrowRightLeft, Building2 } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 interface Distribution {
   id?: string;
@@ -15,23 +17,16 @@ interface Distribution {
   value: number;
 }
 
-interface ExpenseItem {
-  description: string;
-  category: string;
-  amount: number;
-  paymentSource: string;
-}
-
 export default function DistributionsPage() {
-  const [distributions, setDistributions] = useState<Distribution[]>([]);
-  const [businesses, setBusinesses] = useState<Business[]>([]);
-  const [paymentSources, setPaymentSources] = useState<PaymentSource[]>([]);
-  const [monthlyData, setMonthlyData] = useState<Record<string, { revenue: number; expense: number; profit: number }>>({});
-  const [expenseItems, setExpenseItems] = useState<Record<string, ExpenseItem[]>>({});
-  const [expensesByPayer, setExpensesByPayer] = useState<Record<string, { name: string; amount: number }[]>>({});
   const [loading, setLoading] = useState(true);
-  const [selectedMonth, setSelectedMonth] = useState('');
-  const [selectedBusiness, setSelectedBusiness] = useState('');
+  const [businesses, setBusinesses] = useState<Business[]>([]);
+  const [recipients, setRecipients] = useState<Recipient[]>([]);
+  const [distributions, setDistributions] = useState<Distribution[]>([]);
+  const [selectedBusiness, setSelectedBusiness] = useState<string>('');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newRecipientName, setNewRecipientName] = useState('');
+  const [newDistributionType, setNewDistributionType] = useState<'percentage' | 'amount'>('percentage');
+  const [newValue, setNewValue] = useState('');
 
   useEffect(() => {
     loadData();
@@ -41,114 +36,39 @@ export default function DistributionsPage() {
     try {
       setLoading(true);
       
-      if (!db) {
-        console.error('Firebase DBが初期化されていません');
-        setLoading(false);
-        return;
-      }
-      
-      const [businessData, paymentSourceData, expenseData] = await Promise.all([
+      const [businessData, recipientData, paymentSourceData, distributionsData] = await Promise.all([
         getAllBusinesses(),
+        getAllRecipients(),
         getAllPaymentSources(),
-        getExpenses(),
+        getAllRevenueDistributions(),
       ]);
       
       setBusinesses(businessData);
-      setPaymentSources(paymentSourceData);
       
-      // 分配設定を取得
-      const distSnapshot = await getDocs(query(collection(db!, 'revenueDistributions')));
-      setDistributions(distSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Distribution[]);
-      
-      // 利益データを取得
-      const profitSnapshot = await getDocs(query(collection(db!, 'profits')));
-      
-      // 月・事業別データを構築
-      const data: Record<string, Record<string, { revenue: number; expense: number; profit: number }>> = {};
-      const expByPayer: Record<string, Record<string, { name: string; amount: number }[]>> = {};
-      const expItems: Record<string, Record<string, ExpenseItem[]>> = {};
-      
-      // 利益データから売上を取得
-      profitSnapshot.docs.forEach(docSnap => {
-        const d = docSnap.data();
-        const month = d.month;
-        const revenues = d.revenues || {};
-        
-        if (!data[month]) data[month] = {};
-        
-        Object.entries(revenues).forEach(([biz, rev]) => {
-          if (!data[month][biz]) data[month][biz] = { revenue: 0, expense: 0, profit: 0 };
-          data[month][biz].revenue = rev as number;
-        });
+      // 支払い元も分配先として使えるようにマージ
+      const allRecipients = [...recipientData];
+      paymentSourceData.forEach(ps => {
+        if (!allRecipients.some(r => r.name === ps.name)) {
+          allRecipients.push({
+            id: ps.id,
+            name: ps.name,
+            memo: ps.memo || '',
+          });
+        }
       });
+      setRecipients(allRecipients);
       
-      // 経費データを追加
-      expenseData.forEach((exp: any) => {
-        const month = exp.month;
-        const biz = exp.business;
-        const payer = exp.paymentSource || '不明';
-        
-        if (!data[month]) data[month] = {};
-        if (!data[month][biz]) data[month][biz] = { revenue: 0, expense: 0, profit: 0 };
-        data[month][biz].expense += exp.amount;
-        
-        // 経費内訳
-        if (!expItems[month]) expItems[month] = {};
-        if (!expItems[month][biz]) expItems[month][biz] = [];
-        expItems[month][biz].push({
-          description: exp.description || exp.category || '経費',
-          category: exp.category || '',
-          amount: exp.amount,
-          paymentSource: payer,
-        });
-        
-        // 立て替え者ごとに集計
-        if (!expByPayer[month]) expByPayer[month] = {};
-        if (!expByPayer[month][biz]) expByPayer[month][biz] = [];
-        
-        const existing = expByPayer[month][biz].find(p => p.name === payer);
-        if (existing) existing.amount += exp.amount;
-        else expByPayer[month][biz].push({ name: payer, amount: exp.amount });
-      });
+      if (!selectedBusiness && businessData.length > 0) {
+        setSelectedBusiness(businessData[0].name);
+      }
       
-      // 利益計算
-      Object.keys(data).forEach(month => {
-        Object.keys(data[month]).forEach(biz => {
-          data[month][biz].profit = data[month][biz].revenue - data[month][biz].expense;
-        });
-      });
-      
-      // フラットなデータに変換（月_事業をキーに）
-      const flatData: Record<string, { revenue: number; expense: number; profit: number }> = {};
-      const flatExp: Record<string, { name: string; amount: number }[]> = {};
-      const flatItems: Record<string, ExpenseItem[]> = {};
-      
-      Object.keys(data).forEach(month => {
-        Object.keys(data[month]).forEach(biz => {
-          flatData[`${month}_${biz}`] = data[month][biz];
-        });
-      });
-      
-      Object.keys(expByPayer).forEach(month => {
-        Object.keys(expByPayer[month]).forEach(biz => {
-          flatExp[`${month}_${biz}`] = expByPayer[month][biz];
-        });
-      });
-      
-      Object.keys(expItems).forEach(month => {
-        Object.keys(expItems[month]).forEach(biz => {
-          flatItems[`${month}_${biz}`] = expItems[month][biz];
-        });
-      });
-      
-      setMonthlyData(flatData);
-      setExpensesByPayer(flatExp);
-      setExpenseItems(flatItems);
-      
-      // デフォルト選択
-      if (businessData.length > 0) setSelectedBusiness(businessData[0].name);
-      const months = [...new Set(Object.keys(data))].sort().reverse();
-      if (months.length > 0) setSelectedMonth(months[0]);
+      setDistributions(distributionsData.map(dist => ({
+        id: dist.id,
+        businessName: dist.businessName,
+        recipientName: dist.recipientName,
+        distributionType: dist.distributionType,
+        value: dist.value,
+      })));
       
     } catch (error) {
       console.error('データの読み込みに失敗:', error);
@@ -157,211 +77,244 @@ export default function DistributionsPage() {
     }
   };
 
-  // 月リスト生成
-  const months = Array.from({ length: 12 }, (_, i) => {
-    const d = new Date(2025, 9 + i, 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  });
-
-  const key = `${selectedMonth}_${selectedBusiness}`;
-  const data = monthlyData[key] || { revenue: 0, expense: 0, profit: 0 };
-  const payers = expensesByPayer[key] || [];
-  const items = expenseItems[key] || [];
-  const dists = distributions.filter(d => d.businessName === selectedBusiness);
-  
-  // 固定金額合計
-  const totalFixed = dists.filter(d => d.distributionType === 'amount').reduce((s, d) => s + d.value, 0);
-  // 固定金額を引いた後の残り
-  const profitAfterFixed = data.profit - totalFixed;
-  
-  // 分配金額を計算
-  const calcAmount = (d: Distribution) => {
-    if (d.distributionType === 'amount') return d.value;
-    return Math.floor(profitAfterFixed * d.value / 100);
-  };
-
-  const handleAdd = async () => {
-    const name = prompt('分配先を選択（名前を入力）:');
-    if (!name) return;
+  const handleAddSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRecipientName || !newValue) {
+      alert('すべての項目を入力してください');
+      return;
+    }
     
-    const type = confirm('パーセンテージで分配しますか？\n（キャンセルで固定金額）') ? 'percentage' : 'amount';
-    const valueStr = prompt(type === 'percentage' ? '何%？' : '金額は？');
-    const value = parseFloat(valueStr || '0');
-    if (!value) return;
+    const value = parseFloat(newValue);
+    if (isNaN(value) || value < 0) {
+      alert('有効な値を入力してください');
+      return;
+    }
     
-    await addDoc(collection(db!, 'revenueDistributions'), {
-      businessName: selectedBusiness,
-      recipientName: name,
-      distributionType: type,
-      value,
-      createdAt: new Date(),
-    });
-    loadData();
+    try {
+      await addRevenueDistribution({
+        businessName: selectedBusiness,
+        recipientName: newRecipientName,
+        distributionType: newDistributionType,
+        value,
+        memo: '',
+      });
+      setShowAddModal(false);
+      setNewRecipientName('');
+      setNewValue('');
+      loadData();
+    } catch (error) {
+      console.error('分配設定の追加に失敗:', error);
+      alert('追加に失敗しました');
+    }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('削除しますか？')) return;
-    await deleteDoc(doc(db!, 'revenueDistributions', id));
-    loadData();
+    if (!confirm('この設定を削除しますか？')) return;
+    try {
+      await deleteRevenueDistribution(id);
+      loadData();
+    } catch (error) {
+      console.error('削除に失敗:', error);
+      alert('削除に失敗しました');
+    }
   };
 
-  const handleValueChange = async (d: Distribution, newValue: number) => {
+  const handleValueChange = async (d: Distribution, newValue: string) => {
     if (!d.id) return;
-    await updateDoc(doc(db!, 'revenueDistributions', d.id), { value: newValue });
+    const value = parseFloat(newValue);
+    if (isNaN(value)) return;
+    
+    try {
+      await updateRevenueDistribution(d.id, { value });
+      // ローカルステートだけ更新してUXを向上させることも可能だが、
+      // ここではデータを再読み込みして確実に同期
+      loadData();
+    } catch (error) {
+      console.error('更新に失敗:', error);
+    }
   };
 
-  if (loading) return <div className="min-h-screen bg-gray-50 p-8">読み込み中...</div>;
+  const filteredDistributions = distributions.filter(d => d.businessName === selectedBusiness);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="container mx-auto px-4 py-8 max-w-3xl">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">収益分配</h1>
-          <Link href="/" className="text-blue-600 hover:underline text-sm">← ホーム</Link>
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">収益分配設定</h1>
+          <p className="text-muted-foreground mt-1">
+            事業ごとの利益分配ルールを設定します
+          </p>
         </div>
+      </div>
 
-        {/* 月・事業選択 */}
-        <div className="bg-white p-4 rounded-lg shadow mb-4 flex gap-4">
-          <select
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            className="flex-1 border rounded px-3 py-2 text-gray-900 bg-white"
-          >
-            {months.map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
+      <div className="flex gap-4 mb-6">
+        <div className="w-64">
+          <label className="text-sm font-medium mb-1 block">事業を選択</label>
           <select
             value={selectedBusiness}
             onChange={(e) => setSelectedBusiness(e.target.value)}
-            className="flex-1 border rounded px-3 py-2 text-gray-900 bg-white"
+            className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
-            {businesses.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
+            {businesses.map(business => (
+              <option key={business.id} value={business.name}>{business.name}</option>
+            ))}
           </select>
         </div>
+      </div>
 
-        {/* 計算サマリー */}
-        <div className="bg-white p-4 rounded-lg shadow mb-4">
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div>
-              <div className="text-xs text-gray-500">売上</div>
-              <div className="text-xl font-bold text-green-600">¥{data.revenue.toLocaleString()}</div>
-            </div>
-            <div>
-              <div className="text-xs text-gray-500">経費</div>
-              <div className="text-xl font-bold text-red-600">¥{data.expense.toLocaleString()}</div>
-            </div>
-            <div>
-              <div className="text-xs text-gray-500">利益</div>
-              <div className={`text-xl font-bold ${data.profit >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                ¥{data.profit.toLocaleString()}
-              </div>
-            </div>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <div>
+            <CardTitle>{selectedBusiness} の分配ルール</CardTitle>
+            <CardDescription>
+              利益から固定費を引いた金額に対して適用されます
+            </CardDescription>
           </div>
-        </div>
-
-        {/* 経費内訳 */}
-        {items.length > 0 && (
-          <div className="bg-white p-4 rounded-lg shadow mb-4">
-            <div className="text-sm font-semibold text-gray-700 mb-3">経費内訳</div>
-            <div className="space-y-1 mb-3">
-              {items.map((item, i) => (
-                <div key={i} className="flex justify-between text-sm py-1 border-b border-gray-100">
-                  <span className="text-gray-700">{item.description || item.category}</span>
-                  <span className="text-gray-900">¥{item.amount.toLocaleString()}</span>
-                </div>
-              ))}
+          <Button onClick={() => setShowAddModal(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            ルールを追加
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="text-center py-12 text-muted-foreground">読み込み中...</div>
+          ) : filteredDistributions.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">
+              分配ルールが設定されていません
             </div>
-            <div className="border-t pt-2 flex justify-between font-medium">
-              <span className="text-gray-900">経費合計</span>
-              <span className="text-red-600">¥{data.expense.toLocaleString()}</span>
-            </div>
-            {/* 立て替え者 */}
-            {payers.length > 0 && (
-              <div className="mt-3 pt-3 border-t">
-                <div className="text-xs text-gray-500 mb-2">立て替え</div>
-                {payers.map((p, i) => (
-                  <div key={i} className="flex justify-between text-sm py-1">
-                    <span className="text-gray-700">{p.name}</span>
-                    <span className="text-orange-600 font-medium">¥{p.amount.toLocaleString()}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 利益分配 */}
-        <div className="bg-white p-4 rounded-lg shadow">
-          <div className="flex justify-between items-center mb-3">
-            <div className="text-sm font-semibold text-gray-700">利益分配</div>
-            <button
-              onClick={handleAdd}
-              className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
-            >
-              + 追加
-            </button>
-          </div>
-          
-          {dists.length === 0 ? (
-            <p className="text-gray-500 text-sm text-center py-4">分配設定なし</p>
           ) : (
-            <div className="space-y-2">
-              {/* 固定金額 */}
-              {dists.filter(d => d.distributionType === 'amount').map(d => (
-                <div key={d.id} className="flex items-center justify-between py-2 border-b">
-                  <span className="text-gray-900">{d.recipientName}</span>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={d.value}
-                      onChange={(e) => setDistributions(prev => prev.map(x => x.id === d.id ? { ...x, value: parseFloat(e.target.value) || 0 } : x))}
-                      onBlur={(e) => handleValueChange(d, parseFloat(e.target.value) || 0)}
-                      className="w-24 text-right border rounded px-2 py-1 text-sm text-gray-900 bg-white"
-                    />
-                    <span className="text-gray-500 text-sm w-6">円</span>
-                    <span className="text-orange-600 font-medium w-28 text-right">−¥{d.value.toLocaleString()}</span>
-                    <button onClick={() => d.id && handleDelete(d.id)} className="text-red-500 text-sm">✕</button>
-                  </div>
-                </div>
-              ))}
-              
-              {/* 固定金額後の残り表示 */}
-              {totalFixed > 0 && (
-                <div className="flex justify-between py-2 bg-gray-50 px-2 rounded text-sm">
-                  <span className="text-gray-600">残り（%分配対象）</span>
-                  <span className="font-medium text-blue-600">¥{profitAfterFixed.toLocaleString()}</span>
-                </div>
-              )}
-              
-              {/* パーセンテージ */}
-              {dists.filter(d => d.distributionType === 'percentage').map(d => (
-                <div key={d.id} className="flex items-center justify-between py-2 border-b">
-                  <span className="text-gray-900">{d.recipientName}</span>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={d.value}
-                      onChange={(e) => setDistributions(prev => prev.map(x => x.id === d.id ? { ...x, value: parseFloat(e.target.value) || 0 } : x))}
-                      onBlur={(e) => handleValueChange(d, parseFloat(e.target.value) || 0)}
-                      className="w-16 text-right border rounded px-2 py-1 text-sm text-gray-900 bg-white"
-                    />
-                    <span className="text-gray-500 text-sm w-6">%</span>
-                    <span className="text-green-600 font-medium w-28 text-right">¥{calcAmount(d).toLocaleString()}</span>
-                    <button onClick={() => d.id && handleDelete(d.id)} className="text-red-500 text-sm">✕</button>
-                  </div>
-                </div>
-              ))}
-              
-              {/* 合計 */}
-              <div className="flex justify-between pt-3 border-t mt-2">
-                <span className="font-semibold text-gray-900">分配合計</span>
-                <span className="font-bold text-blue-600">
-                  ¥{dists.reduce((s, d) => s + calcAmount(d), 0).toLocaleString()}
-                </span>
-              </div>
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>分配先</TableHead>
+                    <TableHead>タイプ</TableHead>
+                    <TableHead className="text-right">値</TableHead>
+                    <TableHead className="text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredDistributions.map((dist) => (
+                    <TableRow key={dist.id}>
+                      <TableCell className="font-medium">
+                        {dist.recipientName}
+                      </TableCell>
+                      <TableCell>
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          dist.distributionType === 'percentage' 
+                            ? 'bg-blue-100 text-blue-800' 
+                            : 'bg-green-100 text-green-800'
+                        }`}>
+                          {dist.distributionType === 'percentage' ? '割合 (%)' : '固定額 (円)'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end items-center gap-2">
+                          <Input
+                            type="number"
+                            defaultValue={dist.value}
+                            className="w-24 text-right h-8"
+                            onBlur={(e) => handleValueChange(dist, e.target.value)}
+                          />
+                          <span className="text-sm text-muted-foreground w-4">
+                            {dist.distributionType === 'percentage' ? '%' : '円'}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDelete(dist.id!)}
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* 追加モーダル */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md bg-white rounded-xl shadow-xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-6 border-b">
+              <h2 className="text-xl font-semibold">分配ルールを追加</h2>
+            </div>
+            <form onSubmit={handleAddSubmit} className="p-6 space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">分配先</label>
+                <select
+                  value={newRecipientName}
+                  onChange={(e) => setNewRecipientName(e.target.value)}
+                  className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  required
+                >
+                  <option value="">選択してください</option>
+                  {recipients.map(r => (
+                    <option key={r.id} value={r.name}>{r.name}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">タイプ</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="type"
+                      checked={newDistributionType === 'percentage'}
+                      onChange={() => setNewDistributionType('percentage')}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <span>割合 (%)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="type"
+                      checked={newDistributionType === 'amount'}
+                      onChange={() => setNewDistributionType('amount')}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <span>固定額 (円)</span>
+                  </label>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">値</label>
+                <div className="relative">
+                  <Input
+                    type="number"
+                    value={newValue}
+                    onChange={(e) => setNewValue(e.target.value)}
+                    placeholder="0"
+                    required
+                  />
+                  <span className="absolute right-3 top-2.5 text-sm text-muted-foreground">
+                    {newDistributionType === 'percentage' ? '%' : '円'}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="flex justify-end gap-3 mt-6">
+                <Button variant="outline" type="button" onClick={() => setShowAddModal(false)}>
+                  キャンセル
+                </Button>
+                <Button type="submit">追加</Button>
+              </div>
+            </form>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
