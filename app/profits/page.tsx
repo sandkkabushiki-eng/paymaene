@@ -564,10 +564,10 @@ export default function ProfitsPage() {
                         onChange={handleCsvFileSelect}
                         className="hidden"
                       />
-                      <Button as="span" variant="outline">
-                        <Upload className="mr-2 h-4 w-4" />
+                      <span className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2 cursor-pointer">
+                        <Upload className="h-4 w-4" />
                         銀行/カードCSVを選択
-                      </Button>
+                      </span>
                     </label>
                   </div>
                 </div>
@@ -622,10 +622,10 @@ export default function ProfitsPage() {
                           onChange={handleCsvFileSelect}
                           className="hidden"
                         />
-                        <Button as="span" variant="outline" size="sm">
-                          <Upload className="mr-2 h-4 w-4" />
+                        <span className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-3 cursor-pointer">
+                          <Upload className="h-4 w-4" />
                           別のCSVを選択
-                        </Button>
+                        </span>
                       </label>
                     </div>
                   </div>
