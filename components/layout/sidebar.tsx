@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils';
 const navItems = [
   { href: '/', label: 'ダッシュボード', icon: LayoutDashboard },
   { href: '/expenses', label: '経費管理', icon: Receipt },
-  { href: '/profits', label: '利益管理', icon: TrendingUp },
+  { href: '/profits', label: '売上管理', icon: TrendingUp },
   { href: '/assets', label: '資産管理', icon: Wallet },
   { href: '/distributions', label: '収益分配', icon: ArrowRightLeft },
   { href: '/transfers', label: '振り込み管理', icon: Banknote },
