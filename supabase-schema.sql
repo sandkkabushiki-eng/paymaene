@@ -110,6 +110,20 @@ CREATE TABLE IF NOT EXISTS models (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ========== 振り込みステータステーブル ==========
+CREATE TABLE IF NOT EXISTS transfer_statuses (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  month TEXT NOT NULL,
+  recipient_name TEXT NOT NULL,
+  business_name TEXT DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'unpaid' CHECK (status IN ('unpaid', 'paid')),
+  paid_at TIMESTAMPTZ,
+  memo TEXT DEFAULT '',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(month, recipient_name, business_name)
+);
+
 -- ========== インデックス作成 ==========
 CREATE INDEX IF NOT EXISTS idx_expenses_month ON expenses(month);
 CREATE INDEX IF NOT EXISTS idx_expenses_business ON expenses(business);
@@ -117,6 +131,8 @@ CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date DESC);
 CREATE INDEX IF NOT EXISTS idx_profits_month ON profits(month);
 CREATE INDEX IF NOT EXISTS idx_revenue_distributions_business ON revenue_distributions(business_name);
 CREATE INDEX IF NOT EXISTS idx_models_business ON models(business_name);
+CREATE INDEX IF NOT EXISTS idx_transfer_statuses_month ON transfer_statuses(month);
+CREATE INDEX IF NOT EXISTS idx_transfer_statuses_recipient ON transfer_statuses(recipient_name);
 
 -- ========== 更新日時自動更新トリガー ==========
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -155,6 +171,9 @@ CREATE TRIGGER update_revenue_distributions_updated_at BEFORE UPDATE ON revenue_
 DROP TRIGGER IF EXISTS update_models_updated_at ON models;
 CREATE TRIGGER update_models_updated_at BEFORE UPDATE ON models FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_transfer_statuses_updated_at ON transfer_statuses;
+CREATE TRIGGER update_transfer_statuses_updated_at BEFORE UPDATE ON transfer_statuses FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 -- ========== Row Level Security (RLS) ==========
 -- 開発中はRLSを無効化（本番環境では適切に設定してください）
 ALTER TABLE businesses ENABLE ROW LEVEL SECURITY;
@@ -166,6 +185,7 @@ ALTER TABLE profits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE assets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE revenue_distributions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE models ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transfer_statuses ENABLE ROW LEVEL SECURITY;
 
 -- 全ユーザーにアクセスを許可するポリシー（開発用）
 CREATE POLICY "Allow all for businesses" ON businesses FOR ALL USING (true) WITH CHECK (true);
@@ -177,4 +197,5 @@ CREATE POLICY "Allow all for profits" ON profits FOR ALL USING (true) WITH CHECK
 CREATE POLICY "Allow all for assets" ON assets FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all for revenue_distributions" ON revenue_distributions FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all for models" ON models FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all for transfer_statuses" ON transfer_statuses FOR ALL USING (true) WITH CHECK (true);
 

@@ -1,7 +1,7 @@
 import { createClient } from './supabase';
 import { 
   Business, PaymentSource, ExpenseCategory, Recipient, 
-  Expense, Profit, Asset, RevenueDistribution, Model 
+  Expense, Profit, Asset, RevenueDistribution, Model, TransferStatus 
 } from './types';
 
 // formatDateForDB は supabase.ts に定義してあると仮定、またはここで定義
@@ -813,6 +813,110 @@ export const deleteRecipient = async (id: string): Promise<void> => {
   const supabase = createClient();
   const { error } = await supabase
     .from('recipients')
+    .delete()
+    .eq('id', id);
+    
+  if (error) throw error;
+};
+
+// ========== 振り込みステータス (TransferStatus) ==========
+
+export const getAllTransferStatuses = async (): Promise<TransferStatus[]> => {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('transfer_statuses')
+    .select('*')
+    .order('month', { ascending: false });
+    
+  if (error) throw error;
+  return data.map((d: any) => ({
+    id: d.id,
+    month: d.month,
+    recipientName: d.recipient_name,
+    businessName: d.business_name,
+    status: d.status,
+    paidAt: d.paid_at ? new Date(d.paid_at) : null,
+    memo: d.memo,
+    createdAt: new Date(d.created_at),
+    updatedAt: new Date(d.updated_at),
+  }));
+};
+
+export const getTransferStatus = async (month: string, recipientName: string, businessName: string = ''): Promise<TransferStatus | null> => {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('transfer_statuses')
+    .select('*')
+    .eq('month', month)
+    .eq('recipient_name', recipientName)
+    .eq('business_name', businessName)
+    .single();
+    
+  if (error && error.code !== 'PGRST116') throw error;
+  if (!data) return null;
+  
+  return {
+    id: data.id,
+    month: data.month,
+    recipientName: data.recipient_name,
+    businessName: data.business_name,
+    status: data.status,
+    paidAt: data.paid_at ? new Date(data.paid_at) : null,
+    memo: data.memo,
+    createdAt: new Date(data.created_at),
+    updatedAt: new Date(data.updated_at),
+  };
+};
+
+export const upsertTransferStatus = async (transferStatus: Omit<TransferStatus, 'id' | 'createdAt' | 'updatedAt'>): Promise<TransferStatus> => {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('transfer_statuses')
+    .upsert({
+      month: transferStatus.month,
+      recipient_name: transferStatus.recipientName,
+      business_name: transferStatus.businessName,
+      status: transferStatus.status,
+      paid_at: transferStatus.paidAt ? transferStatus.paidAt.toISOString() : null,
+      memo: transferStatus.memo,
+    }, {
+      onConflict: 'month,recipient_name,business_name'
+    })
+    .select()
+    .single();
+    
+  if (error) throw error;
+  return {
+    id: data.id,
+    month: data.month,
+    recipientName: data.recipient_name,
+    businessName: data.business_name,
+    status: data.status,
+    paidAt: data.paid_at ? new Date(data.paid_at) : null,
+    memo: data.memo,
+    createdAt: new Date(data.created_at),
+    updatedAt: new Date(data.updated_at),
+  };
+};
+
+export const updateTransferStatus = async (id: string, status: 'unpaid' | 'paid'): Promise<void> => {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('transfer_statuses')
+    .update({
+      status,
+      paid_at: status === 'paid' ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id);
+    
+  if (error) throw error;
+};
+
+export const deleteTransferStatus = async (id: string): Promise<void> => {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('transfer_statuses')
     .delete()
     .eq('id', id);
     

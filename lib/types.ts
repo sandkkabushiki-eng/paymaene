@@ -111,3 +111,16 @@ export interface RevenueDistribution {
   createdAt?: Date;
   updatedAt?: Date;
 }
+
+// 振り込みステータスデータ
+export interface TransferStatus {
+  id?: string;
+  month: string; // "2025-10" 形式
+  recipientName: string; // 支払先名
+  businessName: string; // 事業名（空の場合は全事業合計）
+  status: 'unpaid' | 'paid'; // ステータス（未払い/支払い済み）
+  paidAt?: Date | null; // 支払い日時
+  memo: string; // メモ
+  createdAt?: Date;
+  updatedAt?: Date;
+}
