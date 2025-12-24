@@ -292,7 +292,7 @@ export default function Home() {
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold tracking-tight">ダッシュボード</h1>
         <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">最終更新: {new Date().toLocaleDateString()}</span>
+          <span className="text-sm text-muted-foreground">最終更新: {format(new Date(), 'yyyy/MM/dd')}</span>
         </div>
       </div>
 
