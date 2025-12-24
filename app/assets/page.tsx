@@ -56,9 +56,10 @@ export default function AssetsPage() {
       setShowForm(false);
       setEditingAsset(null);
       loadAssets();
-    } catch (error) {
-      console.error('資産データの保存に失敗:', error);
-      alert('保存に失敗しました');
+    } catch (error: any) {
+      const errorMessage = error?.message || error?.code || JSON.stringify(error);
+      console.error('資産データの保存に失敗:', errorMessage, error);
+      alert(`保存に失敗しました: ${errorMessage}`);
     }
   };
 

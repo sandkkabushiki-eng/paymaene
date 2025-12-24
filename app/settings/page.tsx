@@ -6,10 +6,11 @@ import {
   getAllPaymentSources, addPaymentSource, updatePaymentSource, deletePaymentSource, 
   getAllExpenseCategories, addExpenseCategory, updateExpenseCategory, deleteExpenseCategory, 
   getAllModels, addModel, updateModel, deleteModel, 
-  getAllRecipients, addRecipient, updateRecipient, deleteRecipient
+  getAllRecipients, addRecipient, updateRecipient, deleteRecipient,
+  getAllCategories, addCategory, updateCategory, deleteCategory
 } from '@/lib/supabase-db';
-import { Business, PaymentSource, ExpenseCategory, Model, Recipient } from '@/lib/types';
-import { Plus, Edit2, Trash2, X, Building2, CreditCard, Tag, Users } from 'lucide-react';
+import { Business, PaymentSource, ExpenseCategory, Model, Recipient, Category } from '@/lib/types';
+import { Plus, Edit2, Trash2, X, Building2, CreditCard, Tag, Users, Folder } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,6 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function SettingsPage() {
   const [businesses, setBusinesses] = useState<Business[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [paymentSources, setPaymentSources] = useState<PaymentSource[]>([]);
   const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([]);
   const [models, setModels] = useState<Model[]>([]);
@@ -25,6 +27,9 @@ export default function SettingsPage() {
   // Modals state
   const [showBusinessModal, setShowBusinessModal] = useState(false);
   const [editingBusiness, setEditingBusiness] = useState<Business | null>(null);
+  
+  const [showCategoryGroupModal, setShowCategoryGroupModal] = useState(false);
+  const [editingCategoryGroup, setEditingCategoryGroup] = useState<Category | null>(null);
   
   const [showPaymentSourceModal, setShowPaymentSourceModal] = useState(false);
   const [editingPaymentSource, setEditingPaymentSource] = useState<PaymentSource | null>(null);
@@ -46,11 +51,22 @@ export default function SettingsPage() {
   const loadAllData = async () => {
     await Promise.all([
       loadBusinesses(),
+      loadCategories(),
       loadPaymentSources(),
       loadExpenseCategories(),
       loadModels(),
       loadRecipients(),
     ]);
+  };
+  
+  const loadCategories = async () => {
+    try {
+      const data = await getAllCategories();
+      setCategories(data);
+    } catch (error: any) {
+      // エラーログはgetAllCategories内で出力されるため、ここでは空配列を設定するだけ
+      setCategories([]);
+    }
   };
 
   const loadBusinesses = async () => {
@@ -91,7 +107,7 @@ export default function SettingsPage() {
   // Generic handler for submitting forms
   const handleSubmit = async (
     e: React.FormEvent,
-    action: 'business' | 'paymentSource' | 'category' | 'model' | 'recipient',
+    action: 'business' | 'categoryGroup' | 'paymentSource' | 'category' | 'model' | 'recipient',
     data: any,
     editingId?: string
   ) => {
@@ -103,6 +119,12 @@ export default function SettingsPage() {
           else await addBusiness(data);
           setShowBusinessModal(false);
           loadBusinesses();
+          break;
+        case 'categoryGroup':
+          if (editingId) await updateCategory(editingId, data);
+          else await addCategory(data);
+          setShowCategoryGroupModal(false);
+          loadCategories();
           break;
         case 'paymentSource':
           if (editingId) await updatePaymentSource(editingId, data);
@@ -129,16 +151,17 @@ export default function SettingsPage() {
           loadRecipients();
           break;
       }
-    } catch (error) {
-      console.error('保存に失敗:', error);
-      alert('保存に失敗しました');
+    } catch (error: any) {
+      const errorMessage = error?.message || error?.code || JSON.stringify(error);
+      console.error('保存に失敗:', errorMessage, error);
+      alert(`保存に失敗しました: ${errorMessage}`);
     }
   };
 
   // Generic handler for deletion
   const handleDelete = async (
     id: string,
-    action: 'business' | 'paymentSource' | 'category' | 'model' | 'recipient'
+    action: 'business' | 'categoryGroup' | 'paymentSource' | 'category' | 'model' | 'recipient'
   ) => {
     if (!confirm('本当に削除しますか？')) return;
     try {
@@ -146,6 +169,11 @@ export default function SettingsPage() {
         case 'business':
           await deleteBusiness(id);
           loadBusinesses();
+          break;
+        case 'categoryGroup':
+          await deleteCategory(id);
+          loadCategories();
+          loadBusinesses(); // カテゴリ削除後、事業も再読み込み
           break;
         case 'paymentSource':
           await deletePaymentSource(id);
@@ -164,9 +192,10 @@ export default function SettingsPage() {
           loadRecipients();
           break;
       }
-    } catch (error) {
-      console.error('削除に失敗:', error);
-      alert('削除に失敗しました');
+    } catch (error: any) {
+      const errorMessage = error?.message || error?.code || JSON.stringify(error);
+      console.error('削除に失敗:', errorMessage, error);
+      alert(`削除に失敗しました: ${errorMessage}`);
     }
   };
 
@@ -179,13 +208,71 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="business" className="space-y-4">
+      <Tabs defaultValue="categoryGroup" className="space-y-4">
         <TabsList>
+          <TabsTrigger value="categoryGroup">カテゴリ管理</TabsTrigger>
           <TabsTrigger value="business">事業管理</TabsTrigger>
           <TabsTrigger value="payment">支払い・分配</TabsTrigger>
           <TabsTrigger value="category">経費カテゴリー</TabsTrigger>
           <TabsTrigger value="model">モデル/部署</TabsTrigger>
         </TabsList>
+
+        {/* カテゴリ管理 */}
+        <TabsContent value="categoryGroup">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>カテゴリ一覧</CardTitle>
+                <CardDescription>事業をグループ化するカテゴリを管理します</CardDescription>
+              </div>
+              <Button onClick={() => { setEditingCategoryGroup(null); setShowCategoryGroupModal(true); }}>
+                <Plus className="mr-2 h-4 w-4" /> 追加
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {categories.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    カテゴリが登録されていません
+                    <br />
+                    <span className="text-sm">カテゴリを追加すると、事業をグループ化できます</span>
+                  </div>
+                ) : (
+                  categories.map((category) => {
+                    const businessCount = businesses.filter(b => b.categoryId === category.id || b.category === category.name).length;
+                    return (
+                      <div key={category.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50">
+                        <div className="flex items-center gap-3">
+                          <div 
+                            className="w-8 h-8 rounded-lg flex items-center justify-center"
+                            style={{ backgroundColor: category.color || '#3b82f6' }}
+                          >
+                            <Folder className="h-4 w-4 text-white" />
+                          </div>
+                          <div>
+                            <div className="font-medium">{category.name}</div>
+                            <div className="text-sm text-muted-foreground">
+                              {businessCount}事業が所属
+                              {category.memo && ` • ${category.memo}`}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="ghost" size="icon" onClick={() => { setEditingCategoryGroup(category); setShowCategoryGroupModal(true); }}>
+                            <Edit2 className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => handleDelete(category.id!, 'categoryGroup')} className="text-red-600 hover:text-red-700 hover:bg-red-50">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* 事業管理 */}
         <TabsContent value="business">
@@ -193,33 +280,98 @@ export default function SettingsPage() {
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle>事業一覧</CardTitle>
-                <CardDescription>管理する事業やプロジェクトを登録します</CardDescription>
+                <CardDescription>カテゴリごとに事業を管理します</CardDescription>
               </div>
               <Button onClick={() => { setEditingBusiness(null); setShowBusinessModal(true); }}>
                 <Plus className="mr-2 h-4 w-4" /> 追加
               </Button>
             </CardHeader>
             <CardContent>
-              <div className="space-y-2">
-                {businesses.map((business) => (
-                  <div key={business.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50">
-                    <div className="flex items-center gap-3">
-                      <div className="w-5 h-5 rounded-full" style={{ backgroundColor: business.color || '#cccccc' }} />
-                      <div>
-                        <div className="font-medium">{business.name}</div>
-                        {business.memo && <div className="text-sm text-muted-foreground">{business.memo}</div>}
+              <div className="space-y-6">
+                {/* カテゴリごとにグループ化 */}
+                {(() => {
+                  // カテゴリIDまたはカテゴリ名でグループ化
+                  const categoryMap = new Map<string, { name: string; color?: string; businesses: Business[] }>();
+                  
+                  // まず、カテゴリマスターからグループを作成
+                  categories.forEach(cat => {
+                    categoryMap.set(cat.id!, { name: cat.name, color: cat.color, businesses: [] });
+                  });
+                  
+                  // カテゴリなしの事業用
+                  const uncategorized: Business[] = [];
+                  
+                  // 事業をカテゴリごとに分類
+                  businesses.forEach(biz => {
+                    if (biz.categoryId && categoryMap.has(biz.categoryId)) {
+                      categoryMap.get(biz.categoryId)!.businesses.push(biz);
+                    } else if (biz.category) {
+                      // カテゴリ名でグループ化（後方互換性）
+                      const key = `name:${biz.category}`;
+                      if (!categoryMap.has(key)) {
+                        categoryMap.set(key, { name: biz.category, businesses: [] });
+                      }
+                      categoryMap.get(key)!.businesses.push(biz);
+                    } else {
+                      uncategorized.push(biz);
+                    }
+                  });
+                  
+                  // カテゴリなしがある場合は追加
+                  if (uncategorized.length > 0) {
+                    categoryMap.set('uncategorized', { name: 'その他', businesses: uncategorized });
+                  }
+                  
+                  // カテゴリを表示順序でソート
+                  const sortedCategories = Array.from(categoryMap.entries()).sort((a, b) => {
+                    const catA = categories.find(c => c.id === a[0]);
+                    const catB = categories.find(c => c.id === b[0]);
+                    if (catA && catB) {
+                      return (catA.displayOrder || 0) - (catB.displayOrder || 0);
+                    }
+                    if (a[0] === 'uncategorized') return 999;
+                    if (b[0] === 'uncategorized') return -999;
+                    return a[1].name.localeCompare(b[1].name);
+                  });
+                  
+                  return sortedCategories.map(([key, group]) => (
+                    <div key={key}>
+                      <h3 className="font-semibold text-lg mb-3 flex items-center gap-2 text-muted-foreground">
+                        {group.color ? (
+                          <div 
+                            className="w-5 h-5 rounded-lg"
+                            style={{ backgroundColor: group.color }}
+                          />
+                        ) : (
+                          <Building2 className="h-4 w-4" />
+                        )}
+                        {group.name}
+                        <span className="text-sm font-normal">({group.businesses.length})</span>
+                      </h3>
+                      <div className="space-y-2 ml-6">
+                        {group.businesses.map((business) => (
+                          <div key={business.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50">
+                            <div className="flex items-center gap-3">
+                              <div className="w-5 h-5 rounded-full" style={{ backgroundColor: business.color || '#cccccc' }} />
+                              <div>
+                                <div className="font-medium">{business.name}</div>
+                                {business.memo && <div className="text-sm text-muted-foreground">{business.memo}</div>}
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button variant="ghost" size="icon" onClick={() => { setEditingBusiness(business); setShowBusinessModal(true); }}>
+                                <Edit2 className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="icon" onClick={() => handleDelete(business.id!, 'business')} className="text-red-600 hover:text-red-700 hover:bg-red-50">
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                    <div className="flex gap-2">
-                      <Button variant="ghost" size="icon" onClick={() => { setEditingBusiness(business); setShowBusinessModal(true); }}>
-                        <Edit2 className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => handleDelete(business.id!, 'business')} className="text-red-600 hover:text-red-700 hover:bg-red-50">
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  ));
+                })()}
               </div>
             </CardContent>
           </Card>
@@ -385,6 +537,70 @@ export default function SettingsPage() {
 
       {/* --- Modals --- */}
       
+      {/* Category Group Modal */}
+      {showCategoryGroupModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md bg-white rounded-xl shadow-xl p-6">
+            <h2 className="text-xl font-bold mb-4">{editingCategoryGroup ? 'カテゴリを編集' : 'カテゴリを追加'}</h2>
+            <form onSubmit={(e) => {
+              const formData = new FormData(e.currentTarget);
+              handleSubmit(e, 'categoryGroup', {
+                name: formData.get('name'),
+                color: formData.get('color'),
+                displayOrder: parseInt(formData.get('displayOrder') as string) || 0,
+                memo: formData.get('memo') || '',
+              }, editingCategoryGroup?.id);
+            }}>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium">カテゴリ名 *</label>
+                  <Input name="name" defaultValue={editingCategoryGroup?.name} placeholder="例: MyFans, YouTube" required />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">テーマカラー</label>
+                  <div className="flex gap-2">
+                    <Input 
+                      type="color" 
+                      name="color" 
+                      defaultValue={editingCategoryGroup?.color || '#3b82f6'} 
+                      className="w-12 h-10 p-1 cursor-pointer"
+                    />
+                    <Input 
+                      name="color_text" 
+                      defaultValue={editingCategoryGroup?.color || '#3b82f6'} 
+                      className="flex-1"
+                      placeholder="#000000"
+                      onChange={(e) => {
+                        const colorInput = e.currentTarget.form?.querySelector('input[type="color"]') as HTMLInputElement;
+                        if (colorInput) colorInput.value = e.target.value;
+                      }}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">表示順序</label>
+                  <Input 
+                    type="number" 
+                    name="displayOrder" 
+                    defaultValue={editingCategoryGroup?.displayOrder || 0} 
+                    placeholder="0"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">数値が小さいほど上に表示されます</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">メモ</label>
+                  <Input name="memo" defaultValue={editingCategoryGroup?.memo || ''} />
+                </div>
+                <div className="flex justify-end gap-3 pt-4">
+                  <Button type="button" variant="outline" onClick={() => setShowCategoryGroupModal(false)}>キャンセル</Button>
+                  <Button type="submit">保存</Button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Business Modal */}
       {showBusinessModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -392,16 +608,44 @@ export default function SettingsPage() {
             <h2 className="text-xl font-bold mb-4">{editingBusiness ? '事業を編集' : '事業を追加'}</h2>
             <form onSubmit={(e) => {
               const formData = new FormData(e.currentTarget);
+              const categoryId = formData.get('categoryId') as string;
               handleSubmit(e, 'business', {
                 name: formData.get('name'),
+                categoryId: categoryId || undefined,
+                category: categoryId ? undefined : (formData.get('category') as string || undefined),
                 memo: formData.get('memo'),
                 color: formData.get('color'),
               }, editingBusiness?.id);
             }}>
               <div className="space-y-4">
                 <div>
+                  <label className="text-sm font-medium">カテゴリ</label>
+                  {categories.length > 0 ? (
+                    <select
+                      name="categoryId"
+                      defaultValue={editingBusiness?.categoryId || ''}
+                      className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      <option value="">カテゴリなし</option>
+                      {categories.map(cat => (
+                        <option key={cat.id} value={cat.id}>{cat.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="space-y-2">
+                      <Input 
+                        name="category" 
+                        defaultValue={editingBusiness?.category || ''} 
+                        placeholder="例: MyFans, YouTube"
+                      />
+                      <p className="text-xs text-muted-foreground">カテゴリが登録されていない場合は、直接入力してください</p>
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground mt-1">同じカテゴリの事業がグループ化されます</p>
+                </div>
+                <div>
                   <label className="text-sm font-medium">事業名 *</label>
-                  <Input name="name" defaultValue={editingBusiness?.name} required />
+                  <Input name="name" defaultValue={editingBusiness?.name} placeholder="例: のの, りん, 学べると" required />
                 </div>
                 <div>
                   <label className="text-sm font-medium">テーマカラー</label>

@@ -1,10 +1,23 @@
 // 事業タイプ（後方互換性のため残す）
 export type BusinessType = 'MyFans' | '非属人人' | 'ココナラ' | '共通';
 
+// カテゴリデータ
+export interface Category {
+  id?: string;
+  name: string; // カテゴリ名（例: "MyFans", "YouTube"など）
+  color?: string; // カラーコード（例: "#3b82f6"）
+  displayOrder?: number; // 表示順序
+  memo?: string; // メモ
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
 // 事業データ
 export interface Business {
   id?: string;
-  name: string; // 事業名（例: "MyFans", "非属人人", "ココナラ"など）
+  name: string; // 事業名（例: "のの", "りん"など）
+  category?: string; // カテゴリ名（後方互換性のため残す）
+  categoryId?: string; // カテゴリID（categoriesテーブルへの参照）
   memo: string; // メモ
   color?: string; // カラーコード（例: "#ff0000"）
   createdAt?: Date;

@@ -1,7 +1,7 @@
 import { createClient } from './supabase';
 import { 
   Business, PaymentSource, ExpenseCategory, Recipient, 
-  Expense, Profit, Asset, RevenueDistribution, Model, TransferStatus 
+  Expense, Profit, Asset, RevenueDistribution, Model, TransferStatus, Category
 } from './types';
 
 // formatDateForDB は supabase.ts に定義してあると仮定、またはここで定義
@@ -16,17 +16,68 @@ const formatDateForDB = (date: Date | string): string => {
 
 export const getAllBusinesses = async (): Promise<Business[]> => {
   const supabase = createClient();
-  const { data, error } = await supabase
+  
+  // category_idとカテゴリ名をJOINして取得を試行
+  let query = supabase
     .from('businesses')
-    .select('*')
-    .order('created_at', { ascending: true });
+    .select(`
+      *,
+      categories:category_id (
+        id,
+        name,
+        color
+      )
+    `);
+  
+  // categoryカラムでのソートを試行
+  try {
+    query = query.order('category', { ascending: true });
+  } catch (e) {
+    // categoryカラムが存在しない場合は無視
+  }
+  
+  // category_idでのソートを試行
+  try {
+    query = query.order('category_id', { ascending: true });
+  } catch (e) {
+    // category_idカラムが存在しない場合は無視
+  }
+  
+  query = query.order('created_at', { ascending: true });
+  
+  const { data, error } = await query;
     
-  if (error) throw error;
-  return data.map((d: any) => ({
+  if (error) {
+    // category_idカラムが存在しない場合、シンプルなクエリで再試行
+    if (error.code === '42703' || error.message?.includes('category') || error.message?.includes('column') || error.message?.includes('relation')) {
+      const { data: retryData, error: retryError } = await supabase
+        .from('businesses')
+        .select('*')
+        .order('created_at', { ascending: true });
+      
+      if (retryError) throw retryError;
+      
+      return retryData.map((d: any) => ({
+        id: d.id,
+        name: d.name,
+        category: d.category || '',
+        categoryId: d.category_id || undefined,
+        memo: d.memo,
+        color: d.color,
+        createdAt: new Date(d.created_at),
+        updatedAt: new Date(d.updated_at),
+      }));
+    }
+    throw error;
+  }
+  
+  return (data || []).map((d: any) => ({
     id: d.id,
     name: d.name,
+    category: d.categories?.name || d.category || '',
+    categoryId: d.category_id || undefined,
     memo: d.memo,
-    color: d.color,
+    color: d.color || d.categories?.color,
     createdAt: new Date(d.created_at),
     updatedAt: new Date(d.updated_at),
   }));
@@ -34,22 +85,76 @@ export const getAllBusinesses = async (): Promise<Business[]> => {
 
 export const addBusiness = async (business: Omit<Business, 'id' | 'createdAt' | 'updatedAt'>): Promise<Business> => {
   const supabase = createClient();
+  
+  const insertData: any = {
+    name: business.name,
+    memo: business.memo,
+    color: business.color,
+  };
+  
+  // categoryIdが指定されている場合は優先
+  if (business.categoryId) {
+    insertData.category_id = business.categoryId;
+  } else if (business.category !== undefined) {
+    insertData.category = business.category;
+  }
+  
   const { data, error } = await supabase
     .from('businesses')
-    .insert({
-      name: business.name,
-      memo: business.memo,
-      color: business.color,
-    })
-    .select()
+    .insert(insertData)
+    .select(`
+      *,
+      categories:category_id (
+        id,
+        name,
+        color
+      )
+    `)
     .single();
     
-  if (error) throw error;
+  if (error) {
+    // category_idカラムが存在しない場合のエラーをハンドリング
+    if (error.code === '42703' || error.message?.includes('category') || error.message?.includes('column')) {
+      // categoryなしで再試行
+      const retryData: any = {
+        name: business.name,
+        memo: business.memo,
+        color: business.color,
+      };
+      
+      if (business.category) {
+        retryData.category = business.category;
+      }
+      
+      const { data: retryResult, error: retryError } = await supabase
+        .from('businesses')
+        .insert(retryData)
+        .select()
+        .single();
+      
+      if (retryError) throw retryError;
+      
+      return {
+        id: retryResult.id,
+        name: retryResult.name,
+        category: retryResult.category || '',
+        categoryId: retryResult.category_id || undefined,
+        memo: retryResult.memo,
+        color: retryResult.color,
+        createdAt: new Date(retryResult.created_at),
+        updatedAt: new Date(retryResult.updated_at),
+      };
+    }
+    throw error;
+  }
+  
   return {
     id: data.id,
     name: data.name,
+    category: data.categories?.name || data.category || '',
+    categoryId: data.category_id || undefined,
     memo: data.memo,
-    color: data.color,
+    color: data.color || data.categories?.color,
     createdAt: new Date(data.created_at),
     updatedAt: new Date(data.updated_at),
   };
@@ -57,17 +162,53 @@ export const addBusiness = async (business: Omit<Business, 'id' | 'createdAt' | 
 
 export const updateBusiness = async (id: string, business: Partial<Business>): Promise<void> => {
   const supabase = createClient();
+  
+  const updateData: any = {
+    updated_at: new Date().toISOString(),
+  };
+  
+  if (business.name !== undefined) updateData.name = business.name;
+  if (business.memo !== undefined) updateData.memo = business.memo;
+  if (business.color !== undefined) updateData.color = business.color;
+  
+  // categoryIdが指定されている場合は優先
+  if (business.categoryId !== undefined) {
+    updateData.category_id = business.categoryId || null;
+  } else if (business.category !== undefined) {
+    updateData.category = business.category;
+  }
+  
   const { error } = await supabase
     .from('businesses')
-    .update({
-      name: business.name,
-      memo: business.memo,
-      color: business.color,
-      updated_at: new Date().toISOString(),
-    })
+    .update(updateData)
     .eq('id', id);
     
-  if (error) throw error;
+  if (error) {
+    // category_idカラムが存在しない場合のエラーをハンドリング
+    if (error.code === '42703' || error.message?.includes('category') || error.message?.includes('column')) {
+      // categoryなしで再試行
+      const retryUpdateData: any = {
+        updated_at: new Date().toISOString(),
+      };
+      
+      if (business.name !== undefined) retryUpdateData.name = business.name;
+      if (business.memo !== undefined) retryUpdateData.memo = business.memo;
+      if (business.color !== undefined) retryUpdateData.color = business.color;
+      
+      if (business.category !== undefined) {
+        retryUpdateData.category = business.category;
+      }
+      
+      const { error: retryError } = await supabase
+        .from('businesses')
+        .update(retryUpdateData)
+        .eq('id', id);
+      
+      if (retryError) throw retryError;
+      return; // categoryなしで更新成功
+    }
+    throw error;
+  }
 };
 
 export const deleteBusiness = async (id: string): Promise<void> => {
@@ -92,6 +233,7 @@ export const getBusiness = async (id: string): Promise<Business | null> => {
   return {
     id: data.id,
     name: data.name,
+    category: data.category || '',
     memo: data.memo,
     color: data.color,
     createdAt: new Date(data.created_at),
@@ -817,6 +959,141 @@ export const deleteRecipient = async (id: string): Promise<void> => {
     .eq('id', id);
     
   if (error) throw error;
+};
+
+// ========== カテゴリ (Category) ==========
+
+export const getAllCategories = async (): Promise<Category[]> => {
+  const supabase = createClient();
+  
+  try {
+    let query = supabase
+      .from('categories')
+      .select('*')
+      .order('display_order', { ascending: true })
+      .order('created_at', { ascending: true });
+    
+    const { data, error } = await query;
+    
+    if (error) {
+      // categoriesテーブルが存在しない場合は空配列を返す
+      // PostgreSQLのエラーコード: 42P01 = relation does not exist
+      // Supabaseのエラーコード: PGRST204 = relation not found
+      if (error.code === '42P01' || error.code === 'PGRST204' || 
+          error.message?.includes('does not exist') || 
+          error.message?.includes('relation') ||
+          error.message?.includes('not found')) {
+        console.warn('カテゴリテーブルが存在しません。マイグレーションを実行してください。');
+        return [];
+      }
+      throw error;
+    }
+    
+    return (data || []).map((d: any) => ({
+      id: d.id,
+      name: d.name,
+      color: d.color,
+      displayOrder: d.display_order,
+      memo: d.memo || '',
+      createdAt: new Date(d.created_at),
+      updatedAt: new Date(d.updated_at),
+    }));
+  } catch (error: any) {
+    // 予期しないエラーもキャッチして空配列を返す
+    console.warn('カテゴリデータの取得に失敗:', error?.message || error?.code || 'Unknown error');
+    return [];
+  }
+};
+
+export const addCategory = async (category: Omit<Category, 'id' | 'createdAt' | 'updatedAt'>): Promise<Category> => {
+  const supabase = createClient();
+  
+  const insertData: any = {
+    name: category.name,
+    color: category.color || '#3b82f6',
+    display_order: category.displayOrder || 0,
+    memo: category.memo || '',
+  };
+  
+  const { data, error } = await supabase
+    .from('categories')
+    .insert(insertData)
+    .select()
+    .single();
+    
+  if (error) {
+    // categoriesテーブルが存在しない場合のエラー
+    if (error.code === '42P01' || error.message?.includes('does not exist')) {
+      throw new Error('カテゴリテーブルが存在しません。マイグレーションを実行してください。');
+    }
+    throw error;
+  }
+  
+  return {
+    id: data.id,
+    name: data.name,
+    color: data.color,
+    displayOrder: data.display_order,
+    memo: data.memo || '',
+    createdAt: new Date(data.created_at),
+    updatedAt: new Date(data.updated_at),
+  };
+};
+
+export const updateCategory = async (id: string, category: Partial<Category>): Promise<void> => {
+  const supabase = createClient();
+  
+  const updateData: any = {
+    updated_at: new Date().toISOString(),
+  };
+  
+  if (category.name !== undefined) updateData.name = category.name;
+  if (category.color !== undefined) updateData.color = category.color;
+  if (category.displayOrder !== undefined) updateData.display_order = category.displayOrder;
+  if (category.memo !== undefined) updateData.memo = category.memo;
+  
+  const { error } = await supabase
+    .from('categories')
+    .update(updateData)
+    .eq('id', id);
+    
+  if (error) {
+    if (error.code === '42P01' || error.message?.includes('does not exist')) {
+      throw new Error('カテゴリテーブルが存在しません。マイグレーションを実行してください。');
+    }
+    throw error;
+  }
+};
+
+export const deleteCategory = async (id: string): Promise<void> => {
+  const supabase = createClient();
+  
+  // このカテゴリを使用している事業がないか確認
+  const { data: businesses, error: checkError } = await supabase
+    .from('businesses')
+    .select('id')
+    .eq('category_id', id)
+    .limit(1);
+  
+  if (checkError && checkError.code !== '42P01') {
+    throw checkError;
+  }
+  
+  if (businesses && businesses.length > 0) {
+    throw new Error('このカテゴリを使用している事業があるため削除できません。');
+  }
+  
+  const { error } = await supabase
+    .from('categories')
+    .delete()
+    .eq('id', id);
+    
+  if (error) {
+    if (error.code === '42P01' || error.message?.includes('does not exist')) {
+      throw new Error('カテゴリテーブルが存在しません。マイグレーションを実行してください。');
+    }
+    throw error;
+  }
 };
 
 // ========== 振り込みステータス (TransferStatus) ==========

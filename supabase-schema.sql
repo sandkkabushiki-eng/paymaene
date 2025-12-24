@@ -8,6 +8,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE IF NOT EXISTS businesses (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL,
+  category TEXT DEFAULT '',
   memo TEXT DEFAULT '',
   color TEXT DEFAULT '#3b82f6',
   created_at TIMESTAMPTZ DEFAULT NOW(),

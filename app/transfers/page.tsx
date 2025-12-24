@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { getAllBusinesses, getExpenses, getAllRevenueDistributions, getAllProfits, getAllTransferStatuses, upsertTransferStatus } from '@/lib/supabase-db';
-import { Business, TransferStatus, Expense, RevenueDistribution } from '@/lib/types';
+import { getAllBusinesses, getExpenses, getAllRevenueDistributions, getAllProfits, getAllTransferStatuses, upsertTransferStatus, getAllCategories } from '@/lib/supabase-db';
+import { Business, TransferStatus, Expense, RevenueDistribution, Category } from '@/lib/types';
 import { format } from 'date-fns';
-import { Banknote, Filter, Download, Wallet, Check, Clock, ChevronDown, Building2, Receipt, ChevronRight, LayoutList, AlignJustify } from 'lucide-react';
+import { Banknote, Filter, Download, Wallet, Check, Clock, ChevronDown, Building2, Receipt, ChevronRight, LayoutList, AlignJustify, Folder } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -31,6 +31,7 @@ interface RecipientData {
 
 interface BusinessMonthData {
   businessName: string;
+  businessCategory?: string;
   businessColor?: string;
   recipients: RecipientData[];
   totalDistribution: number;
@@ -57,6 +58,7 @@ interface MonthData {
 export default function TransfersPage() {
   const [loading, setLoading] = useState(true);
   const [businesses, setBusinesses] = useState<Business[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [monthlyData, setMonthlyData] = useState<MonthData[]>([]);
   const [selectedMonth, setSelectedMonth] = useState<string>('');
   const [transferStatuses, setTransferStatuses] = useState<TransferStatus[]>([]);
@@ -84,8 +86,12 @@ export default function TransfersPage() {
     try {
       setLoading(true);
       
-      const businessesData = await getAllBusinesses();
+      const [businessesData, categoriesData] = await Promise.all([
+        getAllBusinesses(),
+        getAllCategories().catch(() => []) // エラー時は空配列
+      ]);
       setBusinesses(businessesData);
+      setCategories(categoriesData);
       
       // 振り込みステータスを取得（テーブルが存在しない場合は空配列）
       try {
@@ -197,9 +203,15 @@ export default function TransfersPage() {
           const totalExpense = recipients.reduce((sum, r) => sum + r.expenseReimbursement, 0);
           const totalAmount = totalDistribution + totalExpense;
           
+          // カテゴリ名を取得（カテゴリマスターから）
+          const categoryName = business.categoryId 
+            ? (categories.find(c => c.id === business.categoryId)?.name || business.category || 'その他')
+            : (business.category || 'その他');
+          
           return {
             businessName: business.name,
-            businessColor: business.color,
+            businessCategory: categoryName,
+            businessColor: business.color || categories.find(c => c.id === business.categoryId)?.color,
             recipients,
             totalDistribution,
             totalExpense,
@@ -493,9 +505,97 @@ export default function TransfersPage() {
               
               {/* 表示モードに応じたレンダリング */}
               {viewMode === 'detailed' ? (
-                /* 詳細モード（事業別） */
-                <div className="grid gap-6">
-                  {monthData.businesses.map(business => (
+                /* 詳細モード（カテゴリ別 → 事業別） */
+                <div className="space-y-6">
+                  {(() => {
+                    // カテゴリマスターからカテゴリ情報を取得
+                    const categoryMap = new Map<string, { name: string; color?: string; displayOrder: number; businesses: typeof monthData.businesses }>();
+                    
+                    // カテゴリマスターからグループを作成
+                    categories.forEach(cat => {
+                      categoryMap.set(cat.id!, { 
+                        name: cat.name, 
+                        color: cat.color, 
+                        displayOrder: cat.displayOrder || 0,
+                        businesses: [] 
+                      });
+                    });
+                    
+                    // カテゴリなしの事業用
+                    const uncategorized: typeof monthData.businesses = [];
+                    
+                    // 事業をカテゴリごとに分類
+                    monthData.businesses.forEach(biz => {
+                      // businessCategoryIdを事業マスターから取得
+                      const bizCategoryId = businesses.find(b => b.name === biz.businessName)?.categoryId;
+                      
+                      if (bizCategoryId && categoryMap.has(bizCategoryId)) {
+                        categoryMap.get(bizCategoryId)!.businesses.push(biz);
+                      } else if (biz.businessCategory && biz.businessCategory !== 'その他') {
+                        // カテゴリ名でグループ化（後方互換性）
+                        const key = `name:${biz.businessCategory}`;
+                        if (!categoryMap.has(key)) {
+                          categoryMap.set(key, { 
+                            name: biz.businessCategory, 
+                            color: undefined, 
+                            displayOrder: 999,
+                            businesses: [] 
+                          });
+                        }
+                        categoryMap.get(key)!.businesses.push(biz);
+                      } else {
+                        uncategorized.push(biz);
+                      }
+                    });
+                    
+                    // カテゴリなしがある場合は追加
+                    if (uncategorized.length > 0) {
+                      categoryMap.set('uncategorized', { 
+                        name: 'その他', 
+                        color: undefined, 
+                        displayOrder: 999,
+                        businesses: uncategorized 
+                      });
+                    }
+                    
+                    // カテゴリを表示順序でソート
+                    const sortedCats = Array.from(categoryMap.entries()).sort((a, b) => {
+                      return a[1].displayOrder - b[1].displayOrder;
+                    });
+                    
+                    return sortedCats.map(([key, group]) => {
+                      if (group.businesses.length === 0) return null;
+                      
+                      // カテゴリ合計
+                      const categoryTotal = group.businesses.reduce((sum, b) => sum + b.totalAmount, 0);
+                      
+                      return (
+                        <div key={key} className="space-y-4">
+                          {/* カテゴリヘッダー */}
+                          <div className="flex items-center justify-between bg-gradient-to-r from-muted/80 to-muted/40 rounded-lg px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              {group.color ? (
+                                <div 
+                                  className="w-5 h-5 rounded-lg"
+                                  style={{ backgroundColor: group.color }}
+                                />
+                              ) : (
+                                <Folder className="w-5 h-5 text-blue-600" />
+                              )}
+                              <span className="font-bold text-lg">{group.name}</span>
+                              <span className="text-sm text-muted-foreground">({group.businesses.length}事業)</span>
+                            </div>
+                            <div className={cn(
+                              "px-4 py-2 rounded-lg font-bold shadow-sm",
+                              categoryTotal < 0 ? "bg-red-100 text-red-800" : "bg-blue-100 text-blue-800"
+                            )}>
+                              カテゴリ合計: ¥{categoryTotal.toLocaleString()}
+                            </div>
+                          </div>
+                          
+                          {/* カテゴリ内の事業一覧 */}
+                          <div className="grid gap-4 ml-4 pl-4 border-l-2 border-muted">
+                            {group.businesses.map(business => (
                     <Card key={business.businessName} className="overflow-hidden shadow-md border-border/60 transition-shadow hover:shadow-lg">
                       <CardHeader 
                         className="py-4 border-b"
@@ -735,7 +835,12 @@ export default function TransfersPage() {
                         </Table>
                       </CardContent>
                     </Card>
-                  ))}
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    }).filter(Boolean);
+                  })()}
                 </div>
               ) : (
                 /* シンプルモード（人別） */
