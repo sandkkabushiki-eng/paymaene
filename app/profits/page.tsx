@@ -20,12 +20,14 @@ export default function ProfitsPage() {
   const [expandedBusiness, setExpandedBusiness] = useState<string | null>(null);
   const [editingValues, setEditingValues] = useState<Record<string, Record<string, number | null>>>({});
   const [taxRate, setTaxRate] = useState<number>(20);
-  const [startMonth, setStartMonth] = useState<Date>(new Date(new Date().getFullYear(), 0, 1)); // デフォルト: 今年の1月
+  const [startMonth, setStartMonth] = useState<Date | null>(null); // クライアントサイドで初期化
   const [showCsvImportModal, setShowCsvImportModal] = useState(false);
   const [importedRevenues, setImportedRevenues] = useState<ImportedRevenue[]>([]);
   const [importing, setImporting] = useState(false);
 
   useEffect(() => {
+    // クライアントサイドでのみ日付を初期化（Hydrationエラー回避）
+    setStartMonth(new Date(new Date().getFullYear(), 0, 1));
     loadBusinesses();
     loadProfits();
     loadExpenses();
@@ -79,6 +81,7 @@ export default function ProfitsPage() {
 
   // 表示する月のリストを生成（開始月から12ヶ月分 + 前後の期間調整機能用）
   const generateMonths = (): string[] => {
+    if (!startMonth) return [];
     const months = [];
     // 開始月から12ヶ月分生成
     for (let i = 0; i < 12; i++) {
@@ -207,8 +210,8 @@ export default function ProfitsPage() {
   };
 
   // 期間操作
-  const handlePrevYear = () => setStartMonth(subMonths(startMonth, 12));
-  const handleNextYear = () => setStartMonth(addMonths(startMonth, 12));
+  const handlePrevYear = () => startMonth && setStartMonth(subMonths(startMonth, 12));
+  const handleNextYear = () => startMonth && setStartMonth(addMonths(startMonth, 12));
 
   // CSV取り込み処理
   const handleCsvFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -361,7 +364,7 @@ export default function ProfitsPage() {
                   &lt; 前の年
                 </Button>
                 <span className="text-sm font-medium w-32 text-center">
-                  {format(startMonth, 'yyyy年MM月')} 〜
+                  {startMonth ? format(startMonth, 'yyyy年MM月') : '-'} 〜
                 </span>
                 <Button variant="outline" size="sm" onClick={handleNextYear}>
                   次の年 &gt;

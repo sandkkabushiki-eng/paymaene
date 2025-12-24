@@ -54,12 +54,15 @@ export default function Home() {
   const [selectedBusinessForTransfer, setSelectedBusinessForTransfer] = useState<string>(''); // 振り込み関連で選択中の事業
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [businessRecipientData, setBusinessRecipientData] = useState<BusinessRecipientData[]>([]);
+  const [currentDate, setCurrentDate] = useState<string>('');
 
   // デフォルトカラーパレット（事業に色が設定されていない場合に使用）
   const DEFAULT_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#6366f1'];
 
   useEffect(() => {
     loadData();
+    // クライアントサイドでのみ日付を設定（Hydrationエラー回避）
+    setCurrentDate(format(new Date(), 'yyyy/MM/dd'));
   }, []);
 
   const loadData = async () => {
@@ -292,7 +295,7 @@ export default function Home() {
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold tracking-tight">ダッシュボード</h1>
         <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">最終更新: {format(new Date(), 'yyyy/MM/dd')}</span>
+          <span className="text-sm text-muted-foreground">最終更新: {currentDate || '-'}</span>
         </div>
       </div>
 
