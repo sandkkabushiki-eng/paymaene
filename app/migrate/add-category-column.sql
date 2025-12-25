@@ -13,3 +13,4 @@ UPDATE businesses SET category = 'その他' WHERE category = '' OR category IS 
 -- 確認用クエリ
 -- SELECT name, category FROM businesses ORDER BY category, name;
 
+

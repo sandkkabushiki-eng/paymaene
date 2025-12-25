@@ -7,3 +7,4 @@ ALTER TABLE businesses ADD COLUMN IF NOT EXISTS color TEXT DEFAULT '#3b82f6';
 -- 確認用クエリ
 -- SELECT * FROM businesses LIMIT 5;
 
+
