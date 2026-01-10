@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { LoadingOverlay } from '@/components/ui/loading';
 
 export default function SettingsPage() {
   const [businesses, setBusinesses] = useState<Business[]>([]);
@@ -23,6 +24,7 @@ export default function SettingsPage() {
   const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([]);
   const [models, setModels] = useState<Model[]>([]);
   const [recipients, setRecipients] = useState<Recipient[]>([]);
+  const [loading, setLoading] = useState(true);
   
   // Modals state
   const [showBusinessModal, setShowBusinessModal] = useState(false);
@@ -49,14 +51,19 @@ export default function SettingsPage() {
   }, []);
 
   const loadAllData = async () => {
-    await Promise.all([
-      loadBusinesses(),
-      loadCategories(),
-      loadPaymentSources(),
-      loadExpenseCategories(),
-      loadModels(),
-      loadRecipients(),
-    ]);
+    setLoading(true);
+    try {
+      await Promise.all([
+        loadBusinesses(),
+        loadCategories(),
+        loadPaymentSources(),
+        loadExpenseCategories(),
+        loadModels(),
+        loadRecipients(),
+      ]);
+    } finally {
+      setLoading(false);
+    }
   };
   
   const loadCategories = async () => {
@@ -224,51 +231,57 @@ export default function SettingsPage() {
                 <CardTitle>カテゴリ一覧</CardTitle>
                 <CardDescription>事業をグループ化するカテゴリを管理します</CardDescription>
               </div>
-              <Button onClick={() => { setEditingCategoryGroup(null); setShowCategoryGroupModal(true); }}>
+              <Button onClick={() => { setEditingCategoryGroup(null); setShowCategoryGroupModal(true); }} disabled={loading}>
                 <Plus className="mr-2 h-4 w-4" /> 追加
               </Button>
             </CardHeader>
             <CardContent>
-              <div className="space-y-2">
-                {categories.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    カテゴリが登録されていません
-                    <br />
-                    <span className="text-sm">カテゴリを追加すると、事業をグループ化できます</span>
-                  </div>
-                ) : (
-                  categories.map((category) => {
-                    const businessCount = businesses.filter(b => b.categoryId === category.id || b.category === category.name).length;
-                    return (
-                      <div key={category.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50">
-                        <div className="flex items-center gap-3">
-                          <div 
-                            className="w-8 h-8 rounded-lg flex items-center justify-center"
-                            style={{ backgroundColor: category.color || '#3b82f6' }}
-                          >
-                            <Folder className="h-4 w-4 text-white" />
-                          </div>
-                          <div>
-                            <div className="font-medium">{category.name}</div>
-                            <div className="text-sm text-muted-foreground">
-                              {businessCount}事業が所属
-                              {category.memo && ` • ${category.memo}`}
+              {loading ? (
+                <div className="py-8">
+                  <LoadingOverlay />
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {categories.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      カテゴリが登録されていません
+                      <br />
+                      <span className="text-sm">カテゴリを追加すると、事業をグループ化できます</span>
+                    </div>
+                  ) : (
+                    categories.map((category) => {
+                      const businessCount = businesses.filter(b => b.categoryId === category.id || b.category === category.name).length;
+                      return (
+                        <div key={category.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50">
+                          <div className="flex items-center gap-3">
+                            <div 
+                              className="w-8 h-8 rounded-lg flex items-center justify-center"
+                              style={{ backgroundColor: category.color || '#3b82f6' }}
+                            >
+                              <Folder className="h-4 w-4 text-white" />
+                            </div>
+                            <div>
+                              <div className="font-medium">{category.name}</div>
+                              <div className="text-sm text-muted-foreground">
+                                {businessCount}事業が所属
+                                {category.memo && ` • ${category.memo}`}
+                              </div>
                             </div>
                           </div>
+                          <div className="flex gap-2">
+                            <Button variant="ghost" size="icon" onClick={() => { setEditingCategoryGroup(category); setShowCategoryGroupModal(true); }}>
+                              <Edit2 className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => handleDelete(category.id!, 'categoryGroup')} className="text-red-600 hover:text-red-700 hover:bg-red-50">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
-                        <div className="flex gap-2">
-                          <Button variant="ghost" size="icon" onClick={() => { setEditingCategoryGroup(category); setShowCategoryGroupModal(true); }}>
-                            <Edit2 className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDelete(category.id!, 'categoryGroup')} className="text-red-600 hover:text-red-700 hover:bg-red-50">
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -281,11 +294,16 @@ export default function SettingsPage() {
                 <CardTitle>事業一覧</CardTitle>
                 <CardDescription>カテゴリごとに事業を管理します</CardDescription>
               </div>
-              <Button onClick={() => { setEditingBusiness(null); setShowBusinessModal(true); }}>
+              <Button onClick={() => { setEditingBusiness(null); setShowBusinessModal(true); }} disabled={loading}>
                 <Plus className="mr-2 h-4 w-4" /> 追加
               </Button>
             </CardHeader>
             <CardContent>
+              {loading ? (
+                <div className="py-8">
+                  <LoadingOverlay />
+                </div>
+              ) : (
               <div className="space-y-6">
                 {/* カテゴリごとにグループ化 */}
                 {(() => {
@@ -372,6 +390,7 @@ export default function SettingsPage() {
                   ));
                 })()}
               </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -385,32 +404,44 @@ export default function SettingsPage() {
                   <CardTitle>支払い元</CardTitle>
                   <CardDescription>経費の支払い手段（カード、口座など）</CardDescription>
                 </div>
-                <Button size="sm" onClick={() => { setEditingPaymentSource(null); setShowPaymentSourceModal(true); }}>
+                <Button size="sm" onClick={() => { setEditingPaymentSource(null); setShowPaymentSourceModal(true); }} disabled={loading}>
                   <Plus className="mr-2 h-4 w-4" /> 追加
                 </Button>
               </CardHeader>
               <CardContent>
-                <div className="space-y-2">
-                  {paymentSources.map((source) => (
-                    <div key={source.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50">
-                      <div className="flex items-center gap-3">
-                        <CreditCard className="h-5 w-5 text-muted-foreground" />
-                        <div>
-                          <div className="font-medium">{source.name}</div>
-                          {source.memo && <div className="text-sm text-muted-foreground">{source.memo}</div>}
+                {loading ? (
+                  <div className="py-8">
+                    <LoadingOverlay />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {paymentSources.length === 0 ? (
+                      <div className="text-center py-4 text-muted-foreground text-sm">
+                        支払い元が登録されていません
+                      </div>
+                    ) : (
+                      paymentSources.map((source) => (
+                        <div key={source.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50">
+                          <div className="flex items-center gap-3">
+                            <CreditCard className="h-5 w-5 text-muted-foreground" />
+                            <div>
+                              <div className="font-medium">{source.name}</div>
+                              {source.memo && <div className="text-sm text-muted-foreground">{source.memo}</div>}
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button variant="ghost" size="icon" onClick={() => { setEditingPaymentSource(source); setShowPaymentSourceModal(true); }}>
+                              <Edit2 className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => handleDelete(source.id!, 'paymentSource')} className="text-red-600 hover:text-red-700 hover:bg-red-50">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button variant="ghost" size="icon" onClick={() => { setEditingPaymentSource(source); setShowPaymentSourceModal(true); }}>
-                          <Edit2 className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" onClick={() => handleDelete(source.id!, 'paymentSource')} className="text-red-600 hover:text-red-700 hover:bg-red-50">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                      ))
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -420,32 +451,44 @@ export default function SettingsPage() {
                   <CardTitle>分配先</CardTitle>
                   <CardDescription>利益の分配対象となる人や組織</CardDescription>
                 </div>
-                <Button size="sm" onClick={() => { setEditingRecipient(null); setShowRecipientModal(true); }}>
+                <Button size="sm" onClick={() => { setEditingRecipient(null); setShowRecipientModal(true); }} disabled={loading}>
                   <Plus className="mr-2 h-4 w-4" /> 追加
                 </Button>
               </CardHeader>
               <CardContent>
-                <div className="space-y-2">
-                  {recipients.map((recipient) => (
-                    <div key={recipient.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50">
-                      <div className="flex items-center gap-3">
-                        <Users className="h-5 w-5 text-muted-foreground" />
-                        <div>
-                          <div className="font-medium">{recipient.name}</div>
-                          {recipient.memo && <div className="text-sm text-muted-foreground">{recipient.memo}</div>}
+                {loading ? (
+                  <div className="py-8">
+                    <LoadingOverlay />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {recipients.length === 0 ? (
+                      <div className="text-center py-4 text-muted-foreground text-sm">
+                        分配先が登録されていません
+                      </div>
+                    ) : (
+                      recipients.map((recipient) => (
+                        <div key={recipient.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50">
+                          <div className="flex items-center gap-3">
+                            <Users className="h-5 w-5 text-muted-foreground" />
+                            <div>
+                              <div className="font-medium">{recipient.name}</div>
+                              {recipient.memo && <div className="text-sm text-muted-foreground">{recipient.memo}</div>}
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button variant="ghost" size="icon" onClick={() => { setEditingRecipient(recipient); setShowRecipientModal(true); }}>
+                              <Edit2 className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => handleDelete(recipient.id!, 'recipient')} className="text-red-600 hover:text-red-700 hover:bg-red-50">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button variant="ghost" size="icon" onClick={() => { setEditingRecipient(recipient); setShowRecipientModal(true); }}>
-                          <Edit2 className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" onClick={() => handleDelete(recipient.id!, 'recipient')} className="text-red-600 hover:text-red-700 hover:bg-red-50">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                      ))
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -459,29 +502,41 @@ export default function SettingsPage() {
                 <CardTitle>経費カテゴリー</CardTitle>
                 <CardDescription>経費の分類項目を管理します</CardDescription>
               </div>
-              <Button onClick={() => { setEditingCategory(null); setShowCategoryModal(true); }}>
+              <Button onClick={() => { setEditingCategory(null); setShowCategoryModal(true); }} disabled={loading}>
                 <Plus className="mr-2 h-4 w-4" /> 追加
               </Button>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {expenseCategories.map((category) => (
-                  <div key={category.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50">
-                    <div className="flex items-center gap-3">
-                      <Tag className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium">{category.name}</span>
+              {loading ? (
+                <div className="py-8">
+                  <LoadingOverlay />
+                </div>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {expenseCategories.length === 0 ? (
+                    <div className="col-span-full text-center py-4 text-muted-foreground text-sm">
+                      経費カテゴリーが登録されていません
                     </div>
-                    <div className="flex gap-1">
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditingCategory(category); setShowCategoryModal(true); }}>
-                        <Edit2 className="h-3 w-3" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => handleDelete(category.id!, 'category')}>
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ) : (
+                    expenseCategories.map((category) => (
+                      <div key={category.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50">
+                        <div className="flex items-center gap-3">
+                          <Tag className="h-4 w-4 text-muted-foreground" />
+                          <span className="font-medium">{category.name}</span>
+                        </div>
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditingCategory(category); setShowCategoryModal(true); }}>
+                            <Edit2 className="h-3 w-3" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => handleDelete(category.id!, 'category')}>
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -494,41 +549,53 @@ export default function SettingsPage() {
                 <CardTitle>モデル/部署一覧</CardTitle>
                 <CardDescription>事業に紐づく詳細なモデルや部署を管理します</CardDescription>
               </div>
-              <Button onClick={() => { setEditingModel(null); setSelectedBusinessForModel(''); setShowModelModal(true); }}>
+              <Button onClick={() => { setEditingModel(null); setSelectedBusinessForModel(''); setShowModelModal(true); }} disabled={loading}>
                 <Plus className="mr-2 h-4 w-4" /> 追加
               </Button>
             </CardHeader>
             <CardContent>
-              <div className="space-y-6">
-                {businesses.map((business) => {
-                  const businessModels = models.filter(m => m.businessId === business.id);
-                  if (businessModels.length === 0) return null;
-                  
-                  return (
-                    <div key={business.id}>
-                      <h3 className="font-semibold text-lg mb-3 flex items-center gap-2">
-                        <Building2 className="h-4 w-4 text-muted-foreground" />
-                        {business.name}
-                      </h3>
-                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                        {businessModels.map((model) => (
-                          <div key={model.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 bg-gray-50/50">
-                            <span className="font-medium">{model.name}</span>
-                            <div className="flex gap-1">
-                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditingModel(model); setSelectedBusinessForModel(model.businessId); setShowModelModal(true); }}>
-                                <Edit2 className="h-3 w-3" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => handleDelete(model.id!, 'model')}>
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+              {loading ? (
+                <div className="py-8">
+                  <LoadingOverlay />
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {models.length === 0 ? (
+                    <div className="text-center py-4 text-muted-foreground text-sm">
+                      モデル/部署が登録されていません
                     </div>
-                  );
-                })}
-              </div>
+                  ) : (
+                    businesses.map((business) => {
+                      const businessModels = models.filter(m => m.businessId === business.id);
+                      if (businessModels.length === 0) return null;
+                      
+                      return (
+                        <div key={business.id}>
+                          <h3 className="font-semibold text-lg mb-3 flex items-center gap-2">
+                            <Building2 className="h-4 w-4 text-muted-foreground" />
+                            {business.name}
+                          </h3>
+                          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            {businessModels.map((model) => (
+                              <div key={model.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 bg-gray-50/50">
+                                <span className="font-medium">{model.name}</span>
+                                <div className="flex gap-1">
+                                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditingModel(model); setSelectedBusinessForModel(model.businessId); setShowModelModal(true); }}>
+                                    <Edit2 className="h-3 w-3" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => handleDelete(model.id!, 'model')}>
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
