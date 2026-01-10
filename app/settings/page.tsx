@@ -721,7 +721,7 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <label className="text-sm font-medium">事業名 *</label>
-                  <Input name="name" defaultValue={editingBusiness?.name} placeholder="例: のの, りん, 学べると" required />
+                  <Input name="name" defaultValue={editingBusiness?.name} placeholder="例: 山田太郎チャンネル, ECサイトA" required />
                 </div>
                 <div>
                   <label className="text-sm font-medium">テーマカラー</label>
