@@ -1,7 +1,9 @@
 import type { Metadata } from 'next'
-import { Sidebar } from '@/components/layout/sidebar'
 import './globals.css'
 import { cn } from '@/lib/utils'
+import { AuthProvider } from '@/lib/auth-context'
+import { AuthGuard } from '@/components/auth/auth-guard'
+import { AppShell } from '@/components/layout/app-shell'
 
 export const metadata: Metadata = {
   title: 'Sales Manager - 売上管理アプリ',
@@ -16,14 +18,13 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body className={cn("min-h-screen bg-gray-50 text-gray-900 font-sans antialiased")}>
-        <div className="flex min-h-screen">
-          <Sidebar />
-          <main className="flex-1 md:ml-64 p-4 md:p-8 transition-all duration-300 ease-in-out">
-            <div className="max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <AuthProvider>
+          <AuthGuard>
+            <AppShell>
               {children}
-            </div>
-          </main>
-        </div>
+            </AppShell>
+          </AuthGuard>
+        </AuthProvider>
       </body>
     </html>
   )

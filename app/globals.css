@@ -38,28 +38,28 @@
   .dark {
     --background: 222.2 84% 4.9%;
     --foreground: 210 40% 98%;
- 
+
     --card: 222.2 84% 4.9%;
     --card-foreground: 210 40% 98%;
- 
+
     --popover: 222.2 84% 4.9%;
     --popover-foreground: 210 40% 98%;
- 
+
     --primary: 217.2 91.2% 59.8%;
     --primary-foreground: 222.2 47.4% 11.2%;
- 
+
     --secondary: 217.2 32.6% 17.5%;
     --secondary-foreground: 210 40% 98%;
- 
+
     --muted: 217.2 32.6% 17.5%;
     --muted-foreground: 215 20.2% 65.1%;
- 
+
     --accent: 217.2 32.6% 17.5%;
     --accent-foreground: 210 40% 98%;
- 
+
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
- 
+
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
     --ring: 224.3 76.3% 48%;
@@ -97,4 +97,155 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 .dark input[type="date"]::-webkit-calendar-picker-indicator {
   filter: invert(1);
+}
+
+/* ========== Loading Pill Animation ========== */
+.kp-loadpill {
+  height: 40px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+
+  border: 1px solid rgba(0,0,0,.10);
+  background: rgba(255,255,255,.82);
+  color: rgba(0,0,0,.88);
+
+  border-radius: 999px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.08);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .02em;
+
+  cursor: default;
+  user-select: none;
+}
+
+.kp-loadpill:not(.kp-is-loading) {
+  display: none;
+}
+
+/* character blob */
+.kp-blob {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 10px 18px rgba(0,0,0,.16);
+  transform-origin: 50% 80%;
+  animation: kp-bob 1.05s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes kp-bob {
+  0%, 100% { transform: translateY(0) rotate(0deg) scale(1); }
+  50% { transform: translateY(-4px) rotate(-2deg) scale(1.03); }
+}
+
+.kp-eye {
+  position: absolute;
+  top: 11px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #fff;
+  animation: kp-blink 2.9s ease-in-out infinite;
+}
+.kp-left { left: 6px; }
+.kp-right { right: 6px; }
+
+@keyframes kp-blink {
+  0%, 42%, 100% { transform: scaleY(1); }
+  45% { transform: scaleY(.12); }
+  48% { transform: scaleY(1); }
+}
+
+.kp-mouth {
+  position: absolute;
+  left: 50%;
+  top: 19px;
+  width: 10px;
+  height: 6px;
+  transform: translateX(-50%);
+  border-bottom: 2px solid rgba(255,255,255,.92);
+  border-radius: 0 0 999px 999px;
+  opacity: .95;
+  animation: kp-smile 1.6s ease-in-out infinite;
+}
+
+@keyframes kp-smile {
+  0%, 100% { transform: translateX(-50%) scaleX(1); }
+  50% { transform: translateX(-50%) scaleX(1.12); }
+}
+
+.kp-cheek {
+  position: absolute;
+  top: 18px;
+  width: 6px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.22);
+  opacity: .9;
+}
+.kp-c1 { left: 3px; }
+.kp-c2 { right: 3px; }
+
+.kp-shine {
+  position: absolute;
+  left: -40%;
+  top: -60%;
+  width: 80%;
+  height: 190%;
+  transform: rotate(18deg);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.18), transparent);
+  animation: kp-shine 1.7s ease-in-out infinite;
+}
+
+@keyframes kp-shine {
+  0% { transform: translateX(-40%) rotate(18deg); opacity: .15; }
+  55% { transform: translateX(90%) rotate(18deg); opacity: .35; }
+  100% { transform: translateX(170%) rotate(18deg); opacity: .15; }
+}
+
+/* dots */
+.kp-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 2px;
+}
+
+.kp-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(0,0,0,.55);
+  animation: kp-dot 1s ease-in-out infinite;
+}
+.kp-dots i:nth-child(2) { animation-delay: .15s; }
+.kp-dots i:nth-child(3) { animation-delay: .3s; }
+
+@keyframes kp-dot {
+  0%, 100% { transform: translateY(0); opacity: .45; }
+  50% { transform: translateY(-4px); opacity: 1; }
+}
+
+/* Dark mode support */
+.dark .kp-loadpill {
+  border-color: rgba(255,255,255,.10);
+  background: rgba(30,41,59,.85);
+  color: rgba(255,255,255,.88);
+}
+
+.dark .kp-blob {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+}
+
+.dark .kp-dots i {
+  background: rgba(255,255,255,.55);
 }

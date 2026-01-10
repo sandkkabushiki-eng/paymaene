@@ -413,4 +413,3 @@ export function parseRevenueCsv(file: File): Promise<ImportedRevenue[]> {
     reader.readAsText(file, 'Shift_JIS');
   });
 }
-

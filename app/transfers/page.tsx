@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from '@/lib/utils';
+import { LoadingOverlay } from '@/components/ui/loading';
 
 interface ExpenseDetail {
   id: string;
@@ -478,7 +479,7 @@ export default function TransfersPage() {
       </div>
 
       {loading ? (
-        <div className="text-center py-12 text-muted-foreground">読み込み中...</div>
+        <LoadingOverlay />
       ) : filteredData.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">データがありません</div>
       ) : (
@@ -835,7 +836,7 @@ export default function TransfersPage() {
                         </Table>
                       </CardContent>
                     </Card>
-                            ))}
+                  ))}
                           </div>
                         </div>
                       );

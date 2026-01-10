@@ -8,3 +8,4 @@ ALTER TABLE businesses ADD COLUMN IF NOT EXISTS color TEXT DEFAULT '#3b82f6';
 -- SELECT * FROM businesses LIMIT 5;
 
 
+

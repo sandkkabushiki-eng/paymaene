@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { LoadingOverlay } from '@/components/ui/loading';
 
 export default function AssetsPage() {
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -131,9 +132,7 @@ export default function AssetsPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex items-center justify-center h-48 text-muted-foreground">
-              読み込み中...
-            </div>
+            <LoadingOverlay />
           ) : assets.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 text-muted-foreground gap-2">
               <div className="p-3 bg-gray-100 rounded-full">

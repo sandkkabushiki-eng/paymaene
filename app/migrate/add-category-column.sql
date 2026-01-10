@@ -14,3 +14,4 @@ UPDATE businesses SET category = 'その他' WHERE category = '' OR category IS 
 -- SELECT name, category FROM businesses ORDER BY category, name;
 
 
+

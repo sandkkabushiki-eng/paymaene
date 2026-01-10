@@ -7,6 +7,7 @@ import { Expense, Business } from '@/lib/types';
 import { format } from 'date-fns';
 import { Settings, ArrowUpRight, ArrowDownLeft, Wallet, TrendingUp } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { LoadingOverlay } from '@/components/ui/loading';
 import { cn } from '@/lib/utils';
 
 interface Distribution {
@@ -67,12 +68,15 @@ export default function Home() {
 
   const loadData = async () => {
     try {
-      // 経費データ
-      const expenses = await getExpenses();
-      setRecentExpenses(expenses.slice(0, 5));
+      // 並列でデータ取得（I/O最適化）
+      const [expenses, businessesData, allProfits, distributionsData] = await Promise.all([
+        getExpenses(),
+        getAllBusinesses(),
+        getAllProfits(),
+        getAllRevenueDistributions(),
+      ]);
       
-      // 事業データ
-      const businessesData = await getAllBusinesses();
+      setRecentExpenses(expenses.slice(0, 5));
       setBusinesses(businessesData);
       
       // デフォルトで最初の事業を選択
@@ -81,9 +85,6 @@ export default function Home() {
       }
       
       const businesses = businessesData;
-      
-      // 利益データ
-      const allProfits = await getAllProfits();
       
       // 月別・事業別データを構築
       const monthMap: Record<string, { revenue: number; expense: number; businessRevenues: Record<string, number> }> = {};
@@ -181,8 +182,7 @@ export default function Home() {
         netProfit,
       });
       
-      // 分配データを取得して計算
-      const distributionsData = await getAllRevenueDistributions();
+      // 分配データを変換（既に取得済み）
       const distributions = distributionsData.map(dist => ({
         id: dist.id,
         businessName: dist.businessName,
@@ -360,7 +360,7 @@ export default function Home() {
           </CardHeader>
           <CardContent>
             {loading ? (
-              <div className="flex items-center justify-center h-[300px] text-muted-foreground">読み込み中...</div>
+              <LoadingOverlay />
             ) : monthlyData.length === 0 ? (
               <div className="flex items-center justify-center h-[300px] text-muted-foreground">データがありません</div>
             ) : (
@@ -424,7 +424,7 @@ export default function Home() {
           </CardHeader>
           <CardContent>
             {loading ? (
-              <div className="flex items-center justify-center h-[300px] text-muted-foreground">読み込み中...</div>
+              <LoadingOverlay />
             ) : businessData.length === 0 ? (
               <div className="flex items-center justify-center h-[300px] text-muted-foreground">データがありません</div>
             ) : (
@@ -494,7 +494,7 @@ export default function Home() {
             )}
             
             {loading ? (
-              <div className="text-center py-8 text-muted-foreground">読み込み中...</div>
+              <LoadingOverlay />
             ) : recipientMonthlyAmounts.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">データがありません</div>
             ) : (
@@ -563,7 +563,7 @@ export default function Home() {
           </CardHeader>
           <CardContent>
             {loading ? (
-              <div className="text-center py-8 text-muted-foreground">読み込み中...</div>
+              <LoadingOverlay />
             ) : recentExpenses.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">経費データがありません</div>
             ) : (

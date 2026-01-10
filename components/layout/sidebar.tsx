@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { 
   LayoutDashboard, 
   Receipt, 
@@ -11,10 +11,12 @@ import {
   ArrowRightLeft,
   Banknote,
   Menu,
-  X
+  X,
+  LogOut
 } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/lib/auth-context';
 
 const navItems = [
   { href: '/', label: 'ダッシュボード', icon: LayoutDashboard },
@@ -28,7 +30,20 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
+  const { user, signOut } = useAuth();
+
+  const handleSignOut = async () => {
+    await signOut();
+    router.push('/login');
+  };
+
+  // ユーザーのイニシャルを取得
+  const getInitials = (email: string | undefined) => {
+    if (!email) return 'U';
+    return email.charAt(0).toUpperCase();
+  };
 
   return (
     <>
@@ -96,17 +111,24 @@ export function Sidebar() {
 
           <div className="p-4 border-t border-gray-100 bg-gray-50/50 -mx-3 mb-[-1rem]">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-500">
-                User
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-xs font-bold text-white shadow-sm">
+                {getInitials(user?.email)}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-900 truncate">
-                  管理者
+                  {user?.email?.split('@')[0] || 'ゲスト'}
                 </p>
                 <p className="text-xs text-gray-500 truncate">
-                  admin@example.com
+                  {user?.email || '未ログイン'}
                 </p>
               </div>
+              <button
+                onClick={handleSignOut}
+                className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                title="ログアウト"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
             </div>
           </div>
         </div>

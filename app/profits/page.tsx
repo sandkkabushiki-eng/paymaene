@@ -5,12 +5,13 @@ import { getAllProfits, getProfit, updateProfit, addProfit, deleteProfit, calcul
 import { parseRevenueCsv, ImportedRevenue } from '@/lib/csvParser';
 import { Profit, Business, Category } from '@/lib/types';
 import { format, subMonths, addMonths } from 'date-fns';
-import { RefreshCw, ChevronDown, ChevronRight, Save, Trash2, TrendingUp, DollarSign, PieChart, Upload, X, Check, Folder } from 'lucide-react';
+import { RefreshCw, ChevronDown, ChevronRight, Save, Trash2, TrendingUp, Upload, X, Check, Folder } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
+import { LoadingOverlay } from '@/components/ui/loading';
 
 export default function ProfitsPage() {
   const [profits, setProfits] = useState<Profit[]>([]);
@@ -43,10 +44,8 @@ export default function ProfitsPage() {
   useEffect(() => {
     // クライアントサイドでのみ日付を初期化（Hydrationエラー回避）
     setStartMonth(new Date(new Date().getFullYear(), 0, 1));
-    loadBusinesses();
-    loadCategories();
-    loadProfits();
-    loadExpenses();
+    // 並列でデータ取得（I/O最適化）
+    Promise.all([loadBusinesses(), loadCategories(), loadProfits(), loadExpenses()]);
   }, []);
   
   const loadCategories = async () => {
@@ -181,9 +180,9 @@ export default function ProfitsPage() {
           const updated = [...prev];
           updated[index] = { ...updated[index], ...profitData };
           return updated;
-        } else {
+      } else {
           return [...prev, { ...profitData, id: 'temp-' + Date.now() } as Profit];
-        }
+      }
       });
       
       // 編集状態をクリア
@@ -237,13 +236,19 @@ export default function ProfitsPage() {
     try {
       setLoading(true);
       const months = generateMonths();
-      for (const month of months) {
-        const calculated = await calculateProfitForMonth(month);
-        const existing = await getProfit(month);
-        if (existing) {
-          await updateProfit(existing.id!, calculated);
-        }
-      }
+      
+      // 並列で計算と取得を実行（N+1解消）
+      const [calculations, existingProfits] = await Promise.all([
+        Promise.all(months.map(month => calculateProfitForMonth(month))),
+        Promise.all(months.map(month => getProfit(month))),
+      ]);
+      
+      // 更新が必要なものだけ並列で更新
+      const updates = existingProfits
+        .map((existing, i) => existing ? updateProfit(existing.id!, calculations[i]) : null)
+        .filter(Boolean);
+      await Promise.all(updates);
+      
       loadProfits();
       alert('再計算が完了しました');
     } catch (error) {
@@ -321,9 +326,14 @@ export default function ProfitsPage() {
         revenuesByMonth[revenue.month][revenue.business] += revenue.amount;
       }
 
-      // 各月の売上を更新
-      for (const [month, businessRevenues] of Object.entries(revenuesByMonth)) {
-        const existingProfit = await getProfit(month);
+      // 各月の売上を更新（並列化でN+1解消）
+      const monthEntries = Object.entries(revenuesByMonth);
+      const existingProfits = await Promise.all(
+        monthEntries.map(([month]) => getProfit(month))
+      );
+      
+      const operations = monthEntries.map(([month, businessRevenues], i) => {
+        const existingProfit = existingProfits[i];
         let existingRevenues: Record<string, number> = existingProfit?.revenues || {};
         
         // 既存の売上に追加
@@ -345,12 +355,12 @@ export default function ProfitsPage() {
           netProfit: totalRevenue - totalExpense,
         };
         
-        if (existingProfit?.id) {
-          await updateProfit(existingProfit.id, profitData);
-        } else {
-          await addProfit(profitData);
-        }
-      }
+        return existingProfit?.id 
+          ? updateProfit(existingProfit.id, profitData)
+          : addProfit(profitData);
+      });
+      
+      await Promise.all(operations);
 
       alert('売上データの取り込みが完了しました');
       setShowCsvImportModal(false);
@@ -420,7 +430,7 @@ export default function ProfitsPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="text-center py-12 text-muted-foreground">読み込み中...</div>
+            <LoadingOverlay />
           ) : businesses.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               事業が登録されていません
@@ -546,152 +556,152 @@ export default function ProfitsPage() {
                       <div className="space-y-3 ml-4 pl-4 border-l-2 border-muted">
                         {group.businesses.map((business) => {
                           const isExpanded = expandedBusiness === business.name;
-                          
-                          // 合計計算
-                          const totalRevenue = months.reduce((sum, month) => sum + getBusinessRevenueByMonth(business.name, month), 0);
-                          const totalExpense = months.reduce((sum, month) => sum + getBusinessExpenseByMonth(business.name, month), 0);
-                          const totalGrossProfit = totalRevenue - totalExpense;
-                          const totalTax = totalGrossProfit > 0 ? Math.floor(totalGrossProfit * taxRate / 100) : 0;
-                          const totalNetProfit = totalGrossProfit - totalTax;
-                          
-                          return (
-                            <div key={business.id} className="rounded-lg border bg-card text-card-foreground shadow-sm overflow-hidden">
-                              <button
-                                onClick={() => setExpandedBusiness(isExpanded ? null : business.name)}
-                                className="w-full flex items-center justify-between p-4 hover:bg-muted/50 transition-colors"
-                              >
-                                <div className="flex items-center gap-3">
+                
+                // 合計計算
+                const totalRevenue = months.reduce((sum, month) => sum + getBusinessRevenueByMonth(business.name, month), 0);
+                const totalExpense = months.reduce((sum, month) => sum + getBusinessExpenseByMonth(business.name, month), 0);
+                const totalGrossProfit = totalRevenue - totalExpense;
+                const totalTax = totalGrossProfit > 0 ? Math.floor(totalGrossProfit * taxRate / 100) : 0;
+                const totalNetProfit = totalGrossProfit - totalTax;
+                
+                return (
+                  <div key={business.id} className="rounded-lg border bg-card text-card-foreground shadow-sm overflow-hidden">
+                    <button
+                      onClick={() => setExpandedBusiness(isExpanded ? null : business.name)}
+                      className="w-full flex items-center justify-between p-4 hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
                                   {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
                                   <div 
                                     className="w-3 h-3 rounded-full" 
                                     style={{ backgroundColor: business.color || '#3b82f6' }}
                                   />
                                   <span className="font-semibold">{business.name}</span>
-                                </div>
-                                
+                      </div>
+                      
                                 <div className="flex items-center gap-6 text-sm">
-                                  <div className="text-right hidden md:block">
-                                    <div className="text-muted-foreground text-xs mb-0.5">売上</div>
-                                    <div className="font-medium">¥{totalRevenue.toLocaleString()}</div>
-                                  </div>
-                                  <div className="text-right hidden md:block">
-                                    <div className="text-muted-foreground text-xs mb-0.5">経費</div>
-                                    <div className="font-medium text-red-600">¥{totalExpense.toLocaleString()}</div>
-                                  </div>
-                                  <div className="text-right">
-                                    <div className="text-muted-foreground text-xs mb-0.5">粗利</div>
-                                    <div className={cn("font-medium", totalGrossProfit >= 0 ? "text-blue-600" : "text-red-600")}>
-                                      ¥{totalGrossProfit.toLocaleString()}
-                                    </div>
-                                  </div>
-                                  <div className="text-right">
-                                    <div className="text-muted-foreground text-xs mb-0.5">純利益</div>
-                                    <div className={cn("font-bold text-base", totalNetProfit >= 0 ? "text-green-600" : "text-red-600")}>
-                                      ¥{totalNetProfit.toLocaleString()}
-                                    </div>
-                                  </div>
-                                </div>
-                              </button>
+                        <div className="text-right hidden md:block">
+                          <div className="text-muted-foreground text-xs mb-0.5">売上</div>
+                          <div className="font-medium">¥{totalRevenue.toLocaleString()}</div>
+                        </div>
+                        <div className="text-right hidden md:block">
+                          <div className="text-muted-foreground text-xs mb-0.5">経費</div>
+                          <div className="font-medium text-red-600">¥{totalExpense.toLocaleString()}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-muted-foreground text-xs mb-0.5">粗利</div>
+                          <div className={cn("font-medium", totalGrossProfit >= 0 ? "text-blue-600" : "text-red-600")}>
+                            ¥{totalGrossProfit.toLocaleString()}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-muted-foreground text-xs mb-0.5">純利益</div>
+                          <div className={cn("font-bold text-base", totalNetProfit >= 0 ? "text-green-600" : "text-red-600")}>
+                            ¥{totalNetProfit.toLocaleString()}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                    
+                    {isExpanded && (
+                      <div className="border-t animate-accordion-down">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-muted/50">
+                              <TableHead className="w-[100px]">月</TableHead>
+                              <TableHead className="text-right">売上 (入力)</TableHead>
+                              <TableHead className="text-right">経費</TableHead>
+                              <TableHead className="text-right text-blue-600">粗利</TableHead>
+                              <TableHead className="text-right text-orange-600">税金</TableHead>
+                              <TableHead className="text-right font-bold text-green-600">純利益</TableHead>
+                              <TableHead className="text-center w-[100px]">操作</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {months.map((month) => {
+                              const displayValue = getDisplayValue(month, business.name);
+                              const savedRevenue = getBusinessRevenueByMonth(business.name, month);
+                              const expense = getBusinessExpenseByMonth(business.name, month);
+                              const inputValue = editingValues[month]?.[business.name];
+                              const currentRevenue = inputValue !== undefined && inputValue !== null ? Number(inputValue) : savedRevenue;
+                              const grossProfit = currentRevenue - expense;
+                              const tax = grossProfit > 0 ? Math.floor(grossProfit * taxRate / 100) : 0;
+                              const netProfit = grossProfit - tax;
+                              const hasUnsavedChanges = inputValue !== undefined;
                               
-                              {isExpanded && (
-                                <div className="border-t animate-accordion-down">
-                                  <Table>
-                                    <TableHeader>
-                                      <TableRow className="bg-muted/50">
-                                        <TableHead className="w-[100px]">月</TableHead>
-                                        <TableHead className="text-right">売上 (入力)</TableHead>
-                                        <TableHead className="text-right">経費</TableHead>
-                                        <TableHead className="text-right text-blue-600">粗利</TableHead>
-                                        <TableHead className="text-right text-orange-600">税金</TableHead>
-                                        <TableHead className="text-right font-bold text-green-600">純利益</TableHead>
-                                        <TableHead className="text-center w-[100px]">操作</TableHead>
-                                      </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                      {months.map((month) => {
-                                        const displayValue = getDisplayValue(month, business.name);
-                                        const savedRevenue = getBusinessRevenueByMonth(business.name, month);
-                                        const expense = getBusinessExpenseByMonth(business.name, month);
-                                        const inputValue = editingValues[month]?.[business.name];
-                                        const currentRevenue = inputValue !== undefined && inputValue !== null ? Number(inputValue) : savedRevenue;
-                                        const grossProfit = currentRevenue - expense;
-                                        const tax = grossProfit > 0 ? Math.floor(grossProfit * taxRate / 100) : 0;
-                                        const netProfit = grossProfit - tax;
-                                        const hasUnsavedChanges = inputValue !== undefined;
-                                        
-                                        return (
-                                          <TableRow key={month}>
-                                            <TableCell className="font-medium">{month}</TableCell>
-                                            <TableCell>
-                                              <div className="flex items-center justify-end gap-2">
-                                                <div className="relative w-32">
-                                                  <span className="absolute left-2 top-1.5 text-xs text-muted-foreground">¥</span>
-                                                  <Input
-                                                    type="number"
-                                                    value={displayValue}
-                                                    onChange={(e) => handleRevenueChange(month, business.name, e.target.value)}
-                                                    className="h-8 text-right pl-5 pr-2"
-                                                    placeholder="0"
-                                                  />
-                                                </div>
-                                                {hasUnsavedChanges && (
-                                                  <Button
-                                                    size="sm"
-                                                    onClick={() => handleSaveRevenue(month, business.name)}
-                                                    className="h-8 w-8 p-0"
-                                                    title="保存"
-                                                  >
-                                                    <Save className="h-4 w-4" />
-                                                  </Button>
-                                                )}
-                                              </div>
-                                            </TableCell>
-                                            <TableCell className="text-right text-red-600">
-                                              ¥{expense.toLocaleString()}
-                                            </TableCell>
-                                            <TableCell className={cn("text-right font-medium", grossProfit >= 0 ? "text-blue-600" : "text-red-600")}>
-                                              ¥{grossProfit.toLocaleString()}
-                                            </TableCell>
-                                            <TableCell className="text-right text-orange-600">
-                                              ¥{tax.toLocaleString()}
-                                            </TableCell>
-                                            <TableCell className={cn("text-right font-bold", netProfit >= 0 ? "text-green-600" : "text-red-600")}>
-                                              ¥{netProfit.toLocaleString()}
-                                            </TableCell>
-                                            <TableCell className="text-center">
-                                              <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                onClick={() => handleDeleteProfit(month)}
-                                                className="h-8 w-8 p-0 text-muted-foreground hover:text-red-600"
-                                                title="データを削除"
-                                              >
-                                                <Trash2 className="h-4 w-4" />
-                                              </Button>
-                                            </TableCell>
-                                          </TableRow>
-                                        );
-                                      })}
-                                      <TableRow className="bg-muted/50 font-semibold">
-                                        <TableCell>合計</TableCell>
-                                        <TableCell className="text-right">¥{totalRevenue.toLocaleString()}</TableCell>
-                                        <TableCell className="text-right text-red-600">¥{totalExpense.toLocaleString()}</TableCell>
-                                        <TableCell className={cn("text-right", totalGrossProfit >= 0 ? "text-blue-600" : "text-red-600")}>
-                                          ¥{totalGrossProfit.toLocaleString()}
-                                        </TableCell>
-                                        <TableCell className="text-right text-orange-600">¥{totalTax.toLocaleString()}</TableCell>
-                                        <TableCell className={cn("text-right", totalNetProfit >= 0 ? "text-green-600" : "text-red-600")}>
-                                          ¥{totalNetProfit.toLocaleString()}
-                                        </TableCell>
-                                        <TableCell></TableCell>
-                                      </TableRow>
-                                    </TableBody>
-                                  </Table>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
+                              return (
+                                <TableRow key={month}>
+                                  <TableCell className="font-medium">{month}</TableCell>
+                                  <TableCell>
+                                    <div className="flex items-center justify-end gap-2">
+                                      <div className="relative w-32">
+                                        <span className="absolute left-2 top-1.5 text-xs text-muted-foreground">¥</span>
+                                        <Input
+                                          type="number"
+                                          value={displayValue}
+                                          onChange={(e) => handleRevenueChange(month, business.name, e.target.value)}
+                                          className="h-8 text-right pl-5 pr-2"
+                                          placeholder="0"
+                                        />
+                                      </div>
+                                      {hasUnsavedChanges && (
+                                        <Button
+                                          size="sm"
+                                          onClick={() => handleSaveRevenue(month, business.name)}
+                                          className="h-8 w-8 p-0"
+                                          title="保存"
+                                        >
+                                          <Save className="h-4 w-4" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="text-right text-red-600">
+                                    ¥{expense.toLocaleString()}
+                                  </TableCell>
+                                  <TableCell className={cn("text-right font-medium", grossProfit >= 0 ? "text-blue-600" : "text-red-600")}>
+                                    ¥{grossProfit.toLocaleString()}
+                                  </TableCell>
+                                  <TableCell className="text-right text-orange-600">
+                                    ¥{tax.toLocaleString()}
+                                  </TableCell>
+                                  <TableCell className={cn("text-right font-bold", netProfit >= 0 ? "text-green-600" : "text-red-600")}>
+                                    ¥{netProfit.toLocaleString()}
+                                  </TableCell>
+                                  <TableCell className="text-center">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleDeleteProfit(month)}
+                                      className="h-8 w-8 p-0 text-muted-foreground hover:text-red-600"
+                                      title="データを削除"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                            <TableRow className="bg-muted/50 font-semibold">
+                              <TableCell>合計</TableCell>
+                              <TableCell className="text-right">¥{totalRevenue.toLocaleString()}</TableCell>
+                              <TableCell className="text-right text-red-600">¥{totalExpense.toLocaleString()}</TableCell>
+                              <TableCell className={cn("text-right", totalGrossProfit >= 0 ? "text-blue-600" : "text-red-600")}>
+                                ¥{totalGrossProfit.toLocaleString()}
+                              </TableCell>
+                              <TableCell className="text-right text-orange-600">¥{totalTax.toLocaleString()}</TableCell>
+                              <TableCell className={cn("text-right", totalNetProfit >= 0 ? "text-green-600" : "text-red-600")}>
+                                ¥{totalNetProfit.toLocaleString()}
+                              </TableCell>
+                              <TableCell></TableCell>
+                            </TableRow>
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
                       </div>
                     )}
                   </div>

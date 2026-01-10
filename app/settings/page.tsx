@@ -97,9 +97,8 @@ export default function SettingsPage() {
 
   const addDefaultCategories = async () => {
     const DEFAULT_CATEGORIES = ['交通費', '通信費', '消耗品費', '広告宣伝費', '接待交際費', '会議費', '水道光熱費', '地代家賃', '雑費'];
-    for (const name of DEFAULT_CATEGORIES) {
-      await addExpenseCategory({ name, memo: '' });
-    }
+    // 並列で追加（N+1解消）
+    await Promise.all(DEFAULT_CATEGORIES.map(name => addExpenseCategory({ name, memo: '' })));
     const data = await getAllExpenseCategories();
     setExpenseCategories(data);
   };
@@ -350,24 +349,24 @@ export default function SettingsPage() {
                       </h3>
                       <div className="space-y-2 ml-6">
                         {group.businesses.map((business) => (
-                          <div key={business.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50">
-                            <div className="flex items-center gap-3">
-                              <div className="w-5 h-5 rounded-full" style={{ backgroundColor: business.color || '#cccccc' }} />
-                              <div>
-                                <div className="font-medium">{business.name}</div>
-                                {business.memo && <div className="text-sm text-muted-foreground">{business.memo}</div>}
-                              </div>
-                            </div>
-                            <div className="flex gap-2">
-                              <Button variant="ghost" size="icon" onClick={() => { setEditingBusiness(business); setShowBusinessModal(true); }}>
-                                <Edit2 className="h-4 w-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon" onClick={() => handleDelete(business.id!, 'business')} className="text-red-600 hover:text-red-700 hover:bg-red-50">
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
+                  <div key={business.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50">
+                    <div className="flex items-center gap-3">
+                      <div className="w-5 h-5 rounded-full" style={{ backgroundColor: business.color || '#cccccc' }} />
+                      <div>
+                        <div className="font-medium">{business.name}</div>
+                        {business.memo && <div className="text-sm text-muted-foreground">{business.memo}</div>}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="ghost" size="icon" onClick={() => { setEditingBusiness(business); setShowBusinessModal(true); }}>
+                        <Edit2 className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => handleDelete(business.id!, 'business')} className="text-red-600 hover:text-red-700 hover:bg-red-50">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
                       </div>
                     </div>
                   ));
@@ -600,7 +599,7 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
-
+      
       {/* Business Modal */}
       {showBusinessModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">

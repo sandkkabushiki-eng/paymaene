@@ -1,13 +1,14 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getAllBusinesses, getAllPaymentSources, getExpenses, getAllRecipients, getAllRevenueDistributions, addRevenueDistribution, updateRevenueDistribution, deleteRevenueDistribution, getAllProfits } from '@/lib/supabase-db';
+import { getAllBusinesses, getAllPaymentSources, getAllRecipients, getAllRevenueDistributions, addRevenueDistribution, updateRevenueDistribution, deleteRevenueDistribution } from '@/lib/supabase-db';
 import { Business, PaymentSource, Recipient } from '@/lib/types';
-import { Plus, Trash2, Edit2, ArrowRightLeft, Building2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { LoadingOverlay } from '@/components/ui/loading';
 
 interface Distribution {
   id?: string;
@@ -177,7 +178,7 @@ export default function DistributionsPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="text-center py-12 text-muted-foreground">読み込み中...</div>
+            <LoadingOverlay />
           ) : filteredDistributions.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               分配ルールが設定されていません

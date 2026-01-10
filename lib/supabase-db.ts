@@ -1,10 +1,28 @@
-import { createClient } from './supabase';
+import { createClient, getCurrentUserId } from './supabase';
 import { 
   Business, PaymentSource, ExpenseCategory, Recipient, 
   Expense, Profit, Asset, RevenueDistribution, Model, TransferStatus, Category
 } from './types';
+import {
+  mapToBusiness,
+  mapToExpense,
+  mapToProfit,
+  mapToPaymentSource,
+  mapToExpenseCategory,
+  mapToRecipient,
+  mapToAsset,
+  mapToRevenueDistribution,
+  mapToModel,
+  mapToTransferStatus,
+  mapToCategory,
+  isColumnNotFoundError,
+  isTableNotFoundError,
+  isNotFoundError,
+} from './db-mappers';
 
-// formatDateForDB は supabase.ts に定義してあると仮定、またはここで定義
+// ========== ヘルパー関数 ==========
+
+/** 日付をDB用文字列に変換 */
 const formatDateForDB = (date: Date | string): string => {
   if (date instanceof Date) {
     return date.toISOString().split('T')[0];
@@ -12,271 +30,154 @@ const formatDateForDB = (date: Date | string): string => {
   return date;
 };
 
+/** ユーザーIDを取得（未ログインはエラー） */
+const requireUserId = async (): Promise<string> => {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    throw new Error('ログインが必要です');
+  }
+  return userId;
+};
+
+/** 汎用削除関数 */
+const deleteFromTable = async (table: string, id: string): Promise<void> => {
+  const supabase = createClient();
+  const { error } = await supabase.from(table).delete().eq('id', id);
+  if (error) throw error;
+};
+
+/** undefinedでないフィールドのみ抽出 */
+const pickDefined = <T extends Record<string, any>>(obj: T): Partial<T> => {
+  const result: Partial<T> = {};
+  for (const key in obj) {
+    if (obj[key] !== undefined) {
+      result[key] = obj[key];
+    }
+  }
+  return result;
+};
+
 // ========== 事業 (Business) ==========
 
 export const getAllBusinesses = async (): Promise<Business[]> => {
   const supabase = createClient();
   
-  // category_idとカテゴリ名をJOINして取得を試行
-  let query = supabase
+  const { data, error } = await supabase
     .from('businesses')
-    .select(`
-      *,
-      categories:category_id (
-        id,
-        name,
-        color
-      )
-    `);
-  
-  // categoryカラムでのソートを試行
-  try {
-    query = query.order('category', { ascending: true });
-  } catch (e) {
-    // categoryカラムが存在しない場合は無視
-  }
-  
-  // category_idでのソートを試行
-  try {
-    query = query.order('category_id', { ascending: true });
-  } catch (e) {
-    // category_idカラムが存在しない場合は無視
-  }
-  
-  query = query.order('created_at', { ascending: true });
-  
-  const { data, error } = await query;
+    .select(`*, categories:category_id (id, name, color)`)
+    .order('created_at', { ascending: true });
     
   if (error) {
-    // category_idカラムが存在しない場合、シンプルなクエリで再試行
-    if (error.code === '42703' || error.message?.includes('category') || error.message?.includes('column') || error.message?.includes('relation')) {
+    if (isColumnNotFoundError(error)) {
       const { data: retryData, error: retryError } = await supabase
         .from('businesses')
         .select('*')
         .order('created_at', { ascending: true });
-      
       if (retryError) throw retryError;
-      
-      return retryData.map((d: any) => ({
-        id: d.id,
-        name: d.name,
-        category: d.category || '',
-        categoryId: d.category_id || undefined,
-        memo: d.memo,
-        color: d.color,
-        createdAt: new Date(d.created_at),
-        updatedAt: new Date(d.updated_at),
-      }));
+      return (retryData || []).map(d => mapToBusiness(d));
     }
     throw error;
   }
   
-  return (data || []).map((d: any) => ({
-    id: d.id,
-    name: d.name,
-    category: d.categories?.name || d.category || '',
-    categoryId: d.category_id || undefined,
-    memo: d.memo,
-    color: d.color || d.categories?.color,
-    createdAt: new Date(d.created_at),
-    updatedAt: new Date(d.updated_at),
-  }));
+  return (data || []).map((d: any) => mapToBusiness(d, d.categories));
 };
 
 export const addBusiness = async (business: Omit<Business, 'id' | 'createdAt' | 'updatedAt'>): Promise<Business> => {
   const supabase = createClient();
+  const userId = await requireUserId();
   
   const insertData: any = {
     name: business.name,
     memo: business.memo,
     color: business.color,
+    user_id: userId,
+    ...(business.categoryId ? { category_id: business.categoryId } : {}),
+    ...(business.category !== undefined && !business.categoryId ? { category: business.category } : {}),
   };
-  
-  // categoryIdが指定されている場合は優先
-  if (business.categoryId) {
-    insertData.category_id = business.categoryId;
-  } else if (business.category !== undefined) {
-    insertData.category = business.category;
-  }
   
   const { data, error } = await supabase
     .from('businesses')
     .insert(insertData)
-    .select(`
-      *,
-      categories:category_id (
-        id,
-        name,
-        color
-      )
-    `)
+    .select(`*, categories:category_id (id, name, color)`)
     .single();
     
   if (error) {
-    // category_idカラムが存在しない場合のエラーをハンドリング
-    if (error.code === '42703' || error.message?.includes('category') || error.message?.includes('column')) {
-      // categoryなしで再試行
-      const retryData: any = {
+    if (isColumnNotFoundError(error)) {
+      const retryData = {
         name: business.name,
         memo: business.memo,
         color: business.color,
+        user_id: userId,
+        ...(business.category ? { category: business.category } : {}),
       };
-      
-      if (business.category) {
-        retryData.category = business.category;
-      }
-      
       const { data: retryResult, error: retryError } = await supabase
         .from('businesses')
         .insert(retryData)
         .select()
         .single();
-      
       if (retryError) throw retryError;
-      
-      return {
-        id: retryResult.id,
-        name: retryResult.name,
-        category: retryResult.category || '',
-        categoryId: retryResult.category_id || undefined,
-        memo: retryResult.memo,
-        color: retryResult.color,
-        createdAt: new Date(retryResult.created_at),
-        updatedAt: new Date(retryResult.updated_at),
-      };
+      return mapToBusiness(retryResult);
     }
     throw error;
   }
   
-  return {
-    id: data.id,
-    name: data.name,
-    category: data.categories?.name || data.category || '',
-    categoryId: data.category_id || undefined,
-    memo: data.memo,
-    color: data.color || data.categories?.color,
-    createdAt: new Date(data.created_at),
-    updatedAt: new Date(data.updated_at),
-  };
+  return mapToBusiness(data, data.categories);
 };
 
 export const updateBusiness = async (id: string, business: Partial<Business>): Promise<void> => {
   const supabase = createClient();
   
-  const updateData: any = {
+  const updateData: any = pickDefined({
+    name: business.name,
+    memo: business.memo,
+    color: business.color,
+    category_id: business.categoryId !== undefined ? (business.categoryId || null) : undefined,
+    category: business.categoryId === undefined ? business.category : undefined,
     updated_at: new Date().toISOString(),
-  };
+  });
   
-  if (business.name !== undefined) updateData.name = business.name;
-  if (business.memo !== undefined) updateData.memo = business.memo;
-  if (business.color !== undefined) updateData.color = business.color;
-  
-  // categoryIdが指定されている場合は優先
-  if (business.categoryId !== undefined) {
-    updateData.category_id = business.categoryId || null;
-  } else if (business.category !== undefined) {
-    updateData.category = business.category;
-  }
-  
-  const { error } = await supabase
-    .from('businesses')
-    .update(updateData)
-    .eq('id', id);
+  const { error } = await supabase.from('businesses').update(updateData).eq('id', id);
     
   if (error) {
-    // category_idカラムが存在しない場合のエラーをハンドリング
-    if (error.code === '42703' || error.message?.includes('category') || error.message?.includes('column')) {
-      // categoryなしで再試行
-      const retryUpdateData: any = {
+    if (isColumnNotFoundError(error)) {
+      const retryData = pickDefined({
+        name: business.name,
+        memo: business.memo,
+        color: business.color,
+        category: business.category,
         updated_at: new Date().toISOString(),
-      };
-      
-      if (business.name !== undefined) retryUpdateData.name = business.name;
-      if (business.memo !== undefined) retryUpdateData.memo = business.memo;
-      if (business.color !== undefined) retryUpdateData.color = business.color;
-      
-      if (business.category !== undefined) {
-        retryUpdateData.category = business.category;
-      }
-      
-      const { error: retryError } = await supabase
-        .from('businesses')
-        .update(retryUpdateData)
-        .eq('id', id);
-      
+      });
+      const { error: retryError } = await supabase.from('businesses').update(retryData).eq('id', id);
       if (retryError) throw retryError;
-      return; // categoryなしで更新成功
+      return;
     }
     throw error;
   }
 };
 
-export const deleteBusiness = async (id: string): Promise<void> => {
-  const supabase = createClient();
-  const { error } = await supabase
-    .from('businesses')
-    .delete()
-    .eq('id', id);
-    
-  if (error) throw error;
-};
+export const deleteBusiness = async (id: string): Promise<void> => deleteFromTable('businesses', id);
 
 export const getBusiness = async (id: string): Promise<Business | null> => {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from('businesses')
-    .select('*')
-    .eq('id', id)
-    .single();
-    
+  const { data, error } = await supabase.from('businesses').select('*').eq('id', id).single();
   if (error) return null;
-  return {
-    id: data.id,
-    name: data.name,
-    category: data.category || '',
-    memo: data.memo,
-    color: data.color,
-    createdAt: new Date(data.created_at),
-    updatedAt: new Date(data.updated_at),
-  };
+  return mapToBusiness(data);
 };
 
 // ========== 経費 (Expense) ==========
 
 export const getExpenses = async (options?: { month?: string }): Promise<Expense[]> => {
   const supabase = createClient();
-  let query = supabase
-    .from('expenses')
-    .select('*')
-    .order('date', { ascending: false });
-    
-  if (options?.month) {
-    query = query.eq('month', options.month);
-  }
-    
+  let query = supabase.from('expenses').select('*').order('date', { ascending: false });
+  if (options?.month) query = query.eq('month', options.month);
   const { data, error } = await query;
-    
   if (error) throw error;
-  return data.map((d: any) => ({
-    id: d.id,
-    date: new Date(d.date),
-    month: d.month,
-    business: d.business,
-    paymentSource: d.payment_source,
-    category: d.category,
-    description: d.description,
-    amount: d.amount,
-    memo: d.memo,
-    sourceData: d.source_data,
-    isFixedCost: d.is_fixed_cost,
-    fixedCostId: d.fixed_cost_id,
-    createdAt: new Date(d.created_at),
-    updatedAt: new Date(d.updated_at),
-  }));
+  return (data || []).map(mapToExpense);
 };
 
 export const addExpense = async (expense: Omit<Expense, 'id' | 'createdAt' | 'updatedAt'>): Promise<Expense> => {
   const supabase = createClient();
+  const userId = await requireUserId();
   const { data, error } = await supabase
     .from('expenses')
     .insert({
@@ -291,140 +192,61 @@ export const addExpense = async (expense: Omit<Expense, 'id' | 'createdAt' | 'up
       source_data: expense.sourceData,
       is_fixed_cost: expense.isFixedCost,
       fixed_cost_id: expense.fixedCostId,
+      user_id: userId,
     })
     .select()
     .single();
-    
   if (error) throw error;
-  return {
-    id: data.id,
-    date: new Date(data.date),
-    month: data.month,
-    business: data.business,
-    paymentSource: data.payment_source,
-    category: data.category,
-    description: data.description,
-    amount: data.amount,
-    memo: data.memo,
-    sourceData: data.source_data,
-    isFixedCost: data.is_fixed_cost,
-    fixedCostId: data.fixed_cost_id,
-    createdAt: new Date(data.created_at),
-    updatedAt: new Date(data.updated_at),
-  };
+  return mapToExpense(data);
 };
 
 export const updateExpense = async (id: string, expense: Partial<Expense>): Promise<void> => {
   const supabase = createClient();
-  
-  const updateData: any = {
+  const updateData = pickDefined({
+    date: expense.date !== undefined ? formatDateForDB(expense.date) : undefined,
+    month: expense.month,
+    business: expense.business,
+    payment_source: expense.paymentSource,
+    category: expense.category,
+    description: expense.description,
+    amount: expense.amount,
+    memo: expense.memo,
+    is_fixed_cost: expense.isFixedCost,
+    fixed_cost_id: expense.fixedCostId,
     updated_at: new Date().toISOString(),
-  };
-  
-  if (expense.date) updateData.date = formatDateForDB(expense.date);
-  if (expense.month) updateData.month = expense.month;
-  if (expense.business) updateData.business = expense.business;
-  if (expense.paymentSource) updateData.payment_source = expense.paymentSource;
-  if (expense.category) updateData.category = expense.category;
-  if (expense.description) updateData.description = expense.description;
-  if (expense.amount !== undefined) updateData.amount = expense.amount;
-  if (expense.memo) updateData.memo = expense.memo;
-  if (expense.isFixedCost !== undefined) updateData.is_fixed_cost = expense.isFixedCost;
-  
-  const { error } = await supabase
-    .from('expenses')
-    .update(updateData)
-    .eq('id', id);
-    
+  });
+  const { error } = await supabase.from('expenses').update(updateData).eq('id', id);
   if (error) throw error;
 };
 
-export const deleteExpense = async (id: string): Promise<void> => {
-  const supabase = createClient();
-  const { error } = await supabase
-    .from('expenses')
-    .delete()
-    .eq('id', id);
-    
-  if (error) throw error;
-};
+export const deleteExpense = async (id: string): Promise<void> => deleteFromTable('expenses', id);
 
 export const getExpense = async (id: string): Promise<Expense | null> => {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from('expenses')
-    .select('*')
-    .eq('id', id)
-    .single();
-    
+  const { data, error } = await supabase.from('expenses').select('*').eq('id', id).single();
   if (error) return null;
-  return {
-    id: data.id,
-    date: new Date(data.date),
-    month: data.month,
-    business: data.business,
-    paymentSource: data.payment_source,
-    category: data.category,
-    description: data.description,
-    amount: data.amount,
-    memo: data.memo,
-    sourceData: data.source_data,
-    isFixedCost: data.is_fixed_cost,
-    fixedCostId: data.fixed_cost_id,
-    createdAt: new Date(data.created_at),
-    updatedAt: new Date(data.updated_at),
-  };
+  return mapToExpense(data);
 };
 
 // ========== 利益 (Profit) ==========
 
 export const getAllProfits = async (): Promise<Profit[]> => {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from('profits')
-    .select('*')
-    .order('month', { ascending: false });
-    
+  const { data, error } = await supabase.from('profits').select('*').order('month', { ascending: false });
   if (error) throw error;
-  return data.map((d: any) => ({
-    id: d.id,
-    month: d.month,
-    revenues: d.revenues,
-    totalRevenue: d.total_revenue,
-    totalExpense: d.total_expense,
-    grossProfit: d.gross_profit,
-    netProfit: d.net_profit,
-    createdAt: new Date(d.created_at),
-    updatedAt: new Date(d.updated_at),
-  }));
+  return (data || []).map(mapToProfit);
 };
 
 export const getProfit = async (month: string): Promise<Profit | null> => {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from('profits')
-    .select('*')
-    .eq('month', month)
-    .single();
-    
-  if (error && error.code !== 'PGRST116') throw error; // PGRST116 is no rows found
-  if (!data) return null;
-  
-  return {
-    id: data.id,
-    month: data.month,
-    revenues: data.revenues,
-    totalRevenue: data.total_revenue,
-    totalExpense: data.total_expense,
-    grossProfit: data.gross_profit,
-    netProfit: data.net_profit,
-    createdAt: new Date(data.created_at),
-    updatedAt: new Date(data.updated_at),
-  };
+  const { data, error } = await supabase.from('profits').select('*').eq('month', month).single();
+  if (error && !isNotFoundError(error)) throw error;
+  return data ? mapToProfit(data) : null;
 };
 
 export const addProfit = async (profit: Omit<Profit, 'id' | 'createdAt' | 'updatedAt'>): Promise<Profit> => {
   const supabase = createClient();
+  const userId = await requireUserId();
   const { data, error } = await supabase
     .from('profits')
     .insert({
@@ -434,242 +256,117 @@ export const addProfit = async (profit: Omit<Profit, 'id' | 'createdAt' | 'updat
       total_expense: profit.totalExpense,
       gross_profit: profit.grossProfit,
       net_profit: profit.netProfit,
+      user_id: userId,
     })
     .select()
     .single();
-    
   if (error) throw error;
-  return {
-    id: data.id,
-    month: data.month,
-    revenues: data.revenues,
-    totalRevenue: data.total_revenue,
-    totalExpense: data.total_expense,
-    grossProfit: data.gross_profit,
-    netProfit: data.net_profit,
-    createdAt: new Date(data.created_at),
-    updatedAt: new Date(data.updated_at),
-  };
+  return mapToProfit(data);
 };
 
 export const updateProfit = async (id: string, profit: Partial<Profit>): Promise<void> => {
   const supabase = createClient();
-  
-  const updateData: any = {
+  const updateData = pickDefined({
+    revenues: profit.revenues,
+    total_revenue: profit.totalRevenue,
+    total_expense: profit.totalExpense,
+    gross_profit: profit.grossProfit,
+    net_profit: profit.netProfit,
     updated_at: new Date().toISOString(),
-  };
-  
-  if (profit.revenues) updateData.revenues = profit.revenues;
-  if (profit.totalRevenue !== undefined) updateData.total_revenue = profit.totalRevenue;
-  if (profit.totalExpense !== undefined) updateData.total_expense = profit.totalExpense;
-  if (profit.grossProfit !== undefined) updateData.gross_profit = profit.grossProfit;
-  if (profit.netProfit !== undefined) updateData.net_profit = profit.netProfit;
-  
-  const { error } = await supabase
-    .from('profits')
-    .update(updateData)
-    .eq('id', id);
-    
+  });
+  const { error } = await supabase.from('profits').update(updateData).eq('id', id);
   if (error) throw error;
 };
 
-export const deleteProfit = async (id: string): Promise<void> => {
-  const supabase = createClient();
-  const { error } = await supabase
-    .from('profits')
-    .delete()
-    .eq('id', id);
-    
-  if (error) throw error;
-};
+export const deleteProfit = async (id: string): Promise<void> => deleteFromTable('profits', id);
 
 export const calculateProfitForMonth = async (month: string): Promise<Omit<Profit, 'id' | 'createdAt' | 'updatedAt'>> => {
-  // 1. 売上取得 (profitsテーブルから既存のrevenuesを取得)
   const existingProfit = await getProfit(month);
   const revenues = existingProfit?.revenues || {};
   
-  // 2. 経費合計計算
   const supabase = createClient();
-  const { data: expenses, error } = await supabase
-    .from('expenses')
-    .select('amount')
-    .eq('month', month);
-    
+  const { data: expenses, error } = await supabase.from('expenses').select('amount').eq('month', month);
   if (error) throw error;
   
-  const totalExpense = expenses.reduce((sum, exp) => sum + exp.amount, 0);
-  
-  // 3. 売上合計計算
+  const totalExpense = (expenses || []).reduce((sum, exp) => sum + exp.amount, 0);
   const totalRevenue = Object.values(revenues).reduce((sum, rev) => sum + (rev as number), 0);
-  
-  // 4. 利益計算
   const grossProfit = totalRevenue - totalExpense;
-  const netProfit = grossProfit; // 税金計算はここでは行わない（UI側で処理するか、必要ならここに追加）
   
-  return {
-    month,
-    revenues,
-    totalRevenue,
-    totalExpense,
-    grossProfit,
-    netProfit,
-  };
+  return { month, revenues, totalRevenue, totalExpense, grossProfit, netProfit: grossProfit };
 };
 
 // ========== 支払い元 (PaymentSource) ==========
 
 export const getAllPaymentSources = async (): Promise<PaymentSource[]> => {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from('payment_sources')
-    .select('*')
-    .order('created_at', { ascending: true });
-    
+  const { data, error } = await supabase.from('payment_sources').select('*').order('created_at', { ascending: true });
   if (error) throw error;
-  return data.map((d: any) => ({
-    id: d.id,
-    name: d.name,
-    memo: d.memo,
-    createdAt: new Date(d.created_at),
-    updatedAt: new Date(d.updated_at),
-  }));
+  return (data || []).map(mapToPaymentSource);
 };
 
 export const addPaymentSource = async (source: Omit<PaymentSource, 'id' | 'createdAt' | 'updatedAt'>): Promise<PaymentSource> => {
   const supabase = createClient();
+  const userId = await requireUserId();
   const { data, error } = await supabase
     .from('payment_sources')
-    .insert({
-      name: source.name,
-      memo: source.memo,
-    })
+    .insert({ name: source.name, memo: source.memo, user_id: userId })
     .select()
     .single();
-    
   if (error) throw error;
-  return {
-    id: data.id,
-    name: data.name,
-    memo: data.memo,
-    createdAt: new Date(data.created_at),
-    updatedAt: new Date(data.updated_at),
-  };
+  return mapToPaymentSource(data);
 };
 
 export const updatePaymentSource = async (id: string, source: Partial<PaymentSource>): Promise<void> => {
   const supabase = createClient();
-  const { error } = await supabase
-    .from('payment_sources')
-    .update({
-      name: source.name,
-      memo: source.memo,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id);
-    
+  const updateData = pickDefined({ name: source.name, memo: source.memo, updated_at: new Date().toISOString() });
+  const { error } = await supabase.from('payment_sources').update(updateData).eq('id', id);
   if (error) throw error;
 };
 
-export const deletePaymentSource = async (id: string): Promise<void> => {
-  const supabase = createClient();
-  const { error } = await supabase
-    .from('payment_sources')
-    .delete()
-    .eq('id', id);
-    
-  if (error) throw error;
-};
+export const deletePaymentSource = async (id: string): Promise<void> => deleteFromTable('payment_sources', id);
 
 // ========== 経費カテゴリー (ExpenseCategory) ==========
 
 export const getAllExpenseCategories = async (): Promise<ExpenseCategory[]> => {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from('expense_categories')
-    .select('*')
-    .order('created_at', { ascending: true });
-    
+  const { data, error } = await supabase.from('expense_categories').select('*').order('created_at', { ascending: true });
   if (error) throw error;
-  return data.map((d: any) => ({
-    id: d.id,
-    name: d.name,
-    memo: d.memo,
-    createdAt: new Date(d.created_at),
-    updatedAt: new Date(d.updated_at),
-  }));
+  return (data || []).map(mapToExpenseCategory);
 };
 
 export const addExpenseCategory = async (category: Omit<ExpenseCategory, 'id' | 'createdAt' | 'updatedAt'>): Promise<ExpenseCategory> => {
   const supabase = createClient();
+  const userId = await requireUserId();
   const { data, error } = await supabase
     .from('expense_categories')
-    .insert({
-      name: category.name,
-      memo: category.memo,
-    })
+    .insert({ name: category.name, memo: category.memo, user_id: userId })
     .select()
     .single();
-    
   if (error) throw error;
-  return {
-    id: data.id,
-    name: data.name,
-    memo: data.memo,
-    createdAt: new Date(data.created_at),
-    updatedAt: new Date(data.updated_at),
-  };
+  return mapToExpenseCategory(data);
 };
 
 export const updateExpenseCategory = async (id: string, category: Partial<ExpenseCategory>): Promise<void> => {
   const supabase = createClient();
-  const { error } = await supabase
-    .from('expense_categories')
-    .update({
-      name: category.name,
-      memo: category.memo,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id);
-    
+  const updateData = pickDefined({ name: category.name, memo: category.memo, updated_at: new Date().toISOString() });
+  const { error } = await supabase.from('expense_categories').update(updateData).eq('id', id);
   if (error) throw error;
 };
 
-export const deleteExpenseCategory = async (id: string): Promise<void> => {
-  const supabase = createClient();
-  const { error } = await supabase
-    .from('expense_categories')
-    .delete()
-    .eq('id', id);
-    
-  if (error) throw error;
-};
+export const deleteExpenseCategory = async (id: string): Promise<void> => deleteFromTable('expense_categories', id);
 
 // ========== 資産 (Asset) ==========
 
 export const getAllAssets = async (): Promise<Asset[]> => {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from('assets')
-    .select('*')
-    .order('created_at', { ascending: true });
-    
+  const { data, error } = await supabase.from('assets').select('*').order('created_at', { ascending: true });
   if (error) throw error;
-  return data.map((d: any) => ({
-    id: d.id,
-    assetType: d.asset_type,
-    name: d.name,
-    affiliation: d.affiliation,
-    currentBalance: d.current_balance,
-    currency: d.currency,
-    updateDate: new Date(d.update_date),
-    memo: d.memo,
-    createdAt: new Date(d.created_at),
-    updatedAt: new Date(d.updated_at),
-  }));
+  return (data || []).map(mapToAsset);
 };
 
 export const addAsset = async (asset: Omit<Asset, 'id' | 'createdAt' | 'updatedAt'>): Promise<Asset> => {
   const supabase = createClient();
+  const userId = await requireUserId();
   const { data, error } = await supabase
     .from('assets')
     .insert({
@@ -680,83 +377,44 @@ export const addAsset = async (asset: Omit<Asset, 'id' | 'createdAt' | 'updatedA
       currency: asset.currency,
       update_date: formatDateForDB(asset.updateDate),
       memo: asset.memo,
+      user_id: userId,
     })
     .select()
     .single();
-    
   if (error) throw error;
-  return {
-    id: data.id,
-    assetType: data.asset_type,
-    name: data.name,
-    affiliation: data.affiliation,
-    currentBalance: data.current_balance,
-    currency: data.currency,
-    updateDate: new Date(data.update_date),
-    memo: data.memo,
-    createdAt: new Date(data.created_at),
-    updatedAt: new Date(data.updated_at),
-  };
+  return mapToAsset(data);
 };
 
 export const updateAsset = async (id: string, asset: Partial<Asset>): Promise<void> => {
   const supabase = createClient();
-  
-  const updateData: any = {
+  const updateData = pickDefined({
+    asset_type: asset.assetType,
+    name: asset.name,
+    affiliation: asset.affiliation,
+    current_balance: asset.currentBalance,
+    currency: asset.currency,
+    update_date: asset.updateDate !== undefined ? formatDateForDB(asset.updateDate) : undefined,
+    memo: asset.memo,
     updated_at: new Date().toISOString(),
-  };
-  
-  if (asset.assetType) updateData.asset_type = asset.assetType;
-  if (asset.name) updateData.name = asset.name;
-  if (asset.affiliation) updateData.affiliation = asset.affiliation;
-  if (asset.currentBalance !== undefined) updateData.current_balance = asset.currentBalance;
-  if (asset.currency) updateData.currency = asset.currency;
-  if (asset.updateDate) updateData.update_date = formatDateForDB(asset.updateDate);
-  if (asset.memo) updateData.memo = asset.memo;
-  
-  const { error } = await supabase
-    .from('assets')
-    .update(updateData)
-    .eq('id', id);
-    
+  });
+  const { error } = await supabase.from('assets').update(updateData).eq('id', id);
   if (error) throw error;
 };
 
-export const deleteAsset = async (id: string): Promise<void> => {
-  const supabase = createClient();
-  const { error } = await supabase
-    .from('assets')
-    .delete()
-    .eq('id', id);
-    
-  if (error) throw error;
-};
+export const deleteAsset = async (id: string): Promise<void> => deleteFromTable('assets', id);
 
 // ========== 収益分配 (RevenueDistribution) ==========
 
 export const getAllRevenueDistributions = async (): Promise<RevenueDistribution[]> => {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from('revenue_distributions')
-    .select('*')
-    .order('created_at', { ascending: true });
-    
+  const { data, error } = await supabase.from('revenue_distributions').select('*').order('created_at', { ascending: true });
   if (error) throw error;
-  return data.map((d: any) => ({
-    id: d.id,
-    businessName: d.business_name,
-    modelName: d.model_name,
-    recipientName: d.recipient_name,
-    distributionType: d.distribution_type,
-    value: d.value,
-    memo: d.memo,
-    createdAt: new Date(d.created_at),
-    updatedAt: new Date(d.updated_at),
-  }));
+  return (data || []).map(mapToRevenueDistribution);
 };
 
 export const addRevenueDistribution = async (dist: Omit<RevenueDistribution, 'id' | 'createdAt' | 'updatedAt'>): Promise<RevenueDistribution> => {
   const supabase = createClient();
+  const userId = await requireUserId();
   const { data, error } = await supabase
     .from('revenue_distributions')
     .insert({
@@ -766,79 +424,43 @@ export const addRevenueDistribution = async (dist: Omit<RevenueDistribution, 'id
       distribution_type: dist.distributionType,
       value: dist.value,
       memo: dist.memo,
+      user_id: userId,
     })
     .select()
     .single();
-    
   if (error) throw error;
-  return {
-    id: data.id,
-    businessName: data.business_name,
-    modelName: data.model_name,
-    recipientName: data.recipient_name,
-    distributionType: data.distribution_type,
-    value: data.value,
-    memo: data.memo,
-    createdAt: new Date(data.created_at),
-    updatedAt: new Date(data.updated_at),
-  };
+  return mapToRevenueDistribution(data);
 };
 
 export const updateRevenueDistribution = async (id: string, dist: Partial<RevenueDistribution>): Promise<void> => {
   const supabase = createClient();
-  
-  const updateData: any = {
+  const updateData = pickDefined({
+    business_name: dist.businessName,
+    model_name: dist.modelName,
+    recipient_name: dist.recipientName,
+    distribution_type: dist.distributionType,
+    value: dist.value,
+    memo: dist.memo,
     updated_at: new Date().toISOString(),
-  };
-  
-  if (dist.businessName) updateData.business_name = dist.businessName;
-  if (dist.modelName) updateData.model_name = dist.modelName;
-  if (dist.recipientName) updateData.recipient_name = dist.recipientName;
-  if (dist.distributionType) updateData.distribution_type = dist.distributionType;
-  if (dist.value !== undefined) updateData.value = dist.value;
-  if (dist.memo) updateData.memo = dist.memo;
-  
-  const { error } = await supabase
-    .from('revenue_distributions')
-    .update(updateData)
-    .eq('id', id);
-    
+  });
+  const { error } = await supabase.from('revenue_distributions').update(updateData).eq('id', id);
   if (error) throw error;
 };
 
-export const deleteRevenueDistribution = async (id: string): Promise<void> => {
-  const supabase = createClient();
-  const { error } = await supabase
-    .from('revenue_distributions')
-    .delete()
-    .eq('id', id);
-    
-  if (error) throw error;
-};
+export const deleteRevenueDistribution = async (id: string): Promise<void> => deleteFromTable('revenue_distributions', id);
 
 // ========== モデル (Model) ==========
 
 export const getAllModels = async (): Promise<Model[]> => {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from('models')
-    .select('*')
-    .order('created_at', { ascending: true });
-    
+  const { data, error } = await supabase.from('models').select('*').order('created_at', { ascending: true });
   if (error) throw error;
-  return data.map((d: any) => ({
-    id: d.id,
-    businessId: d.business_id,
-    businessName: d.business_name,
-    name: d.name,
-    memo: d.memo,
-    createdAt: new Date(d.created_at),
-    updatedAt: new Date(d.updated_at),
-  }));
+  return (data || []).map(mapToModel);
 };
 
 export const addModel = async (model: Omit<Model, 'id' | 'createdAt' | 'updatedAt'>): Promise<Model> => {
   const supabase = createClient();
+  const userId = await requireUserId();
   const { data, error } = await supabase
     .from('models')
     .insert({
@@ -846,219 +468,120 @@ export const addModel = async (model: Omit<Model, 'id' | 'createdAt' | 'updatedA
       business_name: model.businessName,
       name: model.name,
       memo: model.memo,
+      user_id: userId,
     })
     .select()
     .single();
-    
   if (error) throw error;
-  return {
-    id: data.id,
-    businessId: data.business_id,
-    businessName: data.business_name,
-    name: data.name,
-    memo: data.memo,
-    createdAt: new Date(data.created_at),
-    updatedAt: new Date(data.updated_at),
-  };
+  return mapToModel(data);
 };
 
 export const updateModel = async (id: string, model: Partial<Model>): Promise<void> => {
   const supabase = createClient();
-  
-  const updateData: any = {
+  const updateData = pickDefined({
+    business_id: model.businessId,
+    business_name: model.businessName,
+    name: model.name,
+    memo: model.memo,
     updated_at: new Date().toISOString(),
-  };
-  
-  if (model.businessId) updateData.business_id = model.businessId;
-  if (model.businessName) updateData.business_name = model.businessName;
-  if (model.name) updateData.name = model.name;
-  if (model.memo) updateData.memo = model.memo;
-  
-  const { error } = await supabase
-    .from('models')
-    .update(updateData)
-    .eq('id', id);
-    
+  });
+  const { error } = await supabase.from('models').update(updateData).eq('id', id);
   if (error) throw error;
 };
 
-export const deleteModel = async (id: string): Promise<void> => {
-  const supabase = createClient();
-  const { error } = await supabase
-    .from('models')
-    .delete()
-    .eq('id', id);
-    
-  if (error) throw error;
-};
+export const deleteModel = async (id: string): Promise<void> => deleteFromTable('models', id);
 
-// ========== 共通 ==========
+// ========== 分配先 (Recipient) ==========
 
-// 分配先一覧（recipients + payment_sources）を取得
 export const getAllRecipients = async (): Promise<Recipient[]> => {
   const supabase = createClient();
-  
-  // recipientsテーブルから取得
-  const { data: recipientsData, error: recipientsError } = await supabase
-    .from('recipients')
-    .select('*');
-    
-  if (recipientsError) throw recipientsError;
-  
-  const recipients: Recipient[] = recipientsData.map((d: any) => ({
-    id: d.id,
-    name: d.name,
-    memo: d.memo,
-    createdAt: new Date(d.created_at),
-    updatedAt: new Date(d.updated_at),
-  }));
-  
-  return recipients;
+  const { data, error } = await supabase.from('recipients').select('*');
+  if (error) throw error;
+  return (data || []).map(mapToRecipient);
 };
 
 export const addRecipient = async (recipient: Omit<Recipient, 'id' | 'createdAt' | 'updatedAt'>): Promise<Recipient> => {
   const supabase = createClient();
+  const userId = await requireUserId();
   const { data, error } = await supabase
     .from('recipients')
-    .insert({
-      name: recipient.name,
-      memo: recipient.memo,
-    })
+    .insert({ name: recipient.name, memo: recipient.memo, user_id: userId })
     .select()
     .single();
-    
   if (error) throw error;
-  return {
-    id: data.id,
-    name: data.name,
-    memo: data.memo,
-    createdAt: new Date(data.created_at),
-    updatedAt: new Date(data.updated_at),
-  };
+  return mapToRecipient(data);
 };
 
 export const updateRecipient = async (id: string, recipient: Partial<Recipient>): Promise<void> => {
   const supabase = createClient();
-  const { error } = await supabase
-    .from('recipients')
-    .update({
-      name: recipient.name,
-      memo: recipient.memo,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id);
-    
+  const updateData = pickDefined({ name: recipient.name, memo: recipient.memo, updated_at: new Date().toISOString() });
+  const { error } = await supabase.from('recipients').update(updateData).eq('id', id);
   if (error) throw error;
 };
 
-export const deleteRecipient = async (id: string): Promise<void> => {
-  const supabase = createClient();
-  const { error } = await supabase
-    .from('recipients')
-    .delete()
-    .eq('id', id);
-    
-  if (error) throw error;
-};
+export const deleteRecipient = async (id: string): Promise<void> => deleteFromTable('recipients', id);
 
 // ========== カテゴリ (Category) ==========
 
 export const getAllCategories = async (): Promise<Category[]> => {
   const supabase = createClient();
-  
   try {
-    let query = supabase
+    const { data, error } = await supabase
       .from('categories')
       .select('*')
       .order('display_order', { ascending: true })
       .order('created_at', { ascending: true });
     
-    const { data, error } = await query;
-    
     if (error) {
-      // categoriesテーブルが存在しない場合は空配列を返す
-      // PostgreSQLのエラーコード: 42P01 = relation does not exist
-      // Supabaseのエラーコード: PGRST204 = relation not found
-      if (error.code === '42P01' || error.code === 'PGRST204' || 
-          error.message?.includes('does not exist') || 
-          error.message?.includes('relation') ||
-          error.message?.includes('not found')) {
+      if (isTableNotFoundError(error)) {
         console.warn('カテゴリテーブルが存在しません。マイグレーションを実行してください。');
         return [];
       }
       throw error;
     }
-    
-    return (data || []).map((d: any) => ({
-      id: d.id,
-      name: d.name,
-      color: d.color,
-      displayOrder: d.display_order,
-      memo: d.memo || '',
-      createdAt: new Date(d.created_at),
-      updatedAt: new Date(d.updated_at),
-    }));
+    return (data || []).map(mapToCategory);
   } catch (error: any) {
-    // 予期しないエラーもキャッチして空配列を返す
-    console.warn('カテゴリデータの取得に失敗:', error?.message || error?.code || 'Unknown error');
+    console.warn('カテゴリデータの取得に失敗:', error?.message || 'Unknown error');
     return [];
   }
 };
 
 export const addCategory = async (category: Omit<Category, 'id' | 'createdAt' | 'updatedAt'>): Promise<Category> => {
   const supabase = createClient();
-  
-  const insertData: any = {
-    name: category.name,
-    color: category.color || '#3b82f6',
-    display_order: category.displayOrder || 0,
-    memo: category.memo || '',
-  };
-  
+  const userId = await requireUserId();
   const { data, error } = await supabase
     .from('categories')
-    .insert(insertData)
+    .insert({
+      name: category.name,
+      color: category.color || '#3b82f6',
+      display_order: category.displayOrder || 0,
+      memo: category.memo || '',
+      user_id: userId,
+    })
     .select()
     .single();
     
   if (error) {
-    // categoriesテーブルが存在しない場合のエラー
-    if (error.code === '42P01' || error.message?.includes('does not exist')) {
+    if (isTableNotFoundError(error)) {
       throw new Error('カテゴリテーブルが存在しません。マイグレーションを実行してください。');
     }
     throw error;
   }
-  
-  return {
-    id: data.id,
-    name: data.name,
-    color: data.color,
-    displayOrder: data.display_order,
-    memo: data.memo || '',
-    createdAt: new Date(data.created_at),
-    updatedAt: new Date(data.updated_at),
-  };
+  return mapToCategory(data);
 };
 
 export const updateCategory = async (id: string, category: Partial<Category>): Promise<void> => {
   const supabase = createClient();
-  
-  const updateData: any = {
+  const updateData = pickDefined({
+    name: category.name,
+    color: category.color,
+    display_order: category.displayOrder,
+    memo: category.memo,
     updated_at: new Date().toISOString(),
-  };
-  
-  if (category.name !== undefined) updateData.name = category.name;
-  if (category.color !== undefined) updateData.color = category.color;
-  if (category.displayOrder !== undefined) updateData.display_order = category.displayOrder;
-  if (category.memo !== undefined) updateData.memo = category.memo;
-  
-  const { error } = await supabase
-    .from('categories')
-    .update(updateData)
-    .eq('id', id);
-    
+  });
+  const { error } = await supabase.from('categories').update(updateData).eq('id', id);
   if (error) {
-    if (error.code === '42P01' || error.message?.includes('does not exist')) {
+    if (isTableNotFoundError(error)) {
       throw new Error('カテゴリテーブルが存在しません。マイグレーションを実行してください。');
     }
     throw error;
@@ -1068,28 +591,21 @@ export const updateCategory = async (id: string, category: Partial<Category>): P
 export const deleteCategory = async (id: string): Promise<void> => {
   const supabase = createClient();
   
-  // このカテゴリを使用している事業がないか確認
+  // 使用中チェック
   const { data: businesses, error: checkError } = await supabase
     .from('businesses')
     .select('id')
     .eq('category_id', id)
     .limit(1);
   
-  if (checkError && checkError.code !== '42P01') {
-    throw checkError;
-  }
-  
+  if (checkError && !isTableNotFoundError(checkError)) throw checkError;
   if (businesses && businesses.length > 0) {
     throw new Error('このカテゴリを使用している事業があるため削除できません。');
   }
   
-  const { error } = await supabase
-    .from('categories')
-    .delete()
-    .eq('id', id);
-    
+  const { error } = await supabase.from('categories').delete().eq('id', id);
   if (error) {
-    if (error.code === '42P01' || error.message?.includes('does not exist')) {
+    if (isTableNotFoundError(error)) {
       throw new Error('カテゴリテーブルが存在しません。マイグレーションを実行してください。');
     }
     throw error;
@@ -1100,26 +616,12 @@ export const deleteCategory = async (id: string): Promise<void> => {
 
 export const getAllTransferStatuses = async (): Promise<TransferStatus[]> => {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from('transfer_statuses')
-    .select('*')
-    .order('month', { ascending: false });
-    
+  const { data, error } = await supabase.from('transfer_statuses').select('*').order('month', { ascending: false });
   if (error) throw error;
-  return data.map((d: any) => ({
-    id: d.id,
-    month: d.month,
-    recipientName: d.recipient_name,
-    businessName: d.business_name,
-    status: d.status,
-    paidAt: d.paid_at ? new Date(d.paid_at) : null,
-    memo: d.memo,
-    createdAt: new Date(d.created_at),
-    updatedAt: new Date(d.updated_at),
-  }));
+  return (data || []).map(mapToTransferStatus);
 };
 
-export const getTransferStatus = async (month: string, recipientName: string, businessName: string = ''): Promise<TransferStatus | null> => {
+export const getTransferStatus = async (month: string, recipientName: string, businessName = ''): Promise<TransferStatus | null> => {
   const supabase = createClient();
   const { data, error } = await supabase
     .from('transfer_statuses')
@@ -1128,25 +630,13 @@ export const getTransferStatus = async (month: string, recipientName: string, bu
     .eq('recipient_name', recipientName)
     .eq('business_name', businessName)
     .single();
-    
-  if (error && error.code !== 'PGRST116') throw error;
-  if (!data) return null;
-  
-  return {
-    id: data.id,
-    month: data.month,
-    recipientName: data.recipient_name,
-    businessName: data.business_name,
-    status: data.status,
-    paidAt: data.paid_at ? new Date(data.paid_at) : null,
-    memo: data.memo,
-    createdAt: new Date(data.created_at),
-    updatedAt: new Date(data.updated_at),
-  };
+  if (error && !isNotFoundError(error)) throw error;
+  return data ? mapToTransferStatus(data) : null;
 };
 
 export const upsertTransferStatus = async (transferStatus: Omit<TransferStatus, 'id' | 'createdAt' | 'updatedAt'>): Promise<TransferStatus> => {
   const supabase = createClient();
+  const userId = await requireUserId();
   const { data, error } = await supabase
     .from('transfer_statuses')
     .upsert({
@@ -1156,24 +646,12 @@ export const upsertTransferStatus = async (transferStatus: Omit<TransferStatus, 
       status: transferStatus.status,
       paid_at: transferStatus.paidAt ? transferStatus.paidAt.toISOString() : null,
       memo: transferStatus.memo,
-    }, {
-      onConflict: 'month,recipient_name,business_name'
-    })
+      user_id: userId,
+    }, { onConflict: 'month,recipient_name,business_name,user_id' })
     .select()
     .single();
-    
   if (error) throw error;
-  return {
-    id: data.id,
-    month: data.month,
-    recipientName: data.recipient_name,
-    businessName: data.business_name,
-    status: data.status,
-    paidAt: data.paid_at ? new Date(data.paid_at) : null,
-    memo: data.memo,
-    createdAt: new Date(data.created_at),
-    updatedAt: new Date(data.updated_at),
-  };
+  return mapToTransferStatus(data);
 };
 
 export const updateTransferStatus = async (id: string, status: 'unpaid' | 'paid'): Promise<void> => {
@@ -1186,16 +664,7 @@ export const updateTransferStatus = async (id: string, status: 'unpaid' | 'paid'
       updated_at: new Date().toISOString(),
     })
     .eq('id', id);
-    
   if (error) throw error;
 };
 
-export const deleteTransferStatus = async (id: string): Promise<void> => {
-  const supabase = createClient();
-  const { error } = await supabase
-    .from('transfer_statuses')
-    .delete()
-    .eq('id', id);
-    
-  if (error) throw error;
-};
+export const deleteTransferStatus = async (id: string): Promise<void> => deleteFromTable('transfer_statuses', id);
