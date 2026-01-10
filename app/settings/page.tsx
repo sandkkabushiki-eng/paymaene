@@ -220,7 +220,7 @@ export default function SettingsPage() {
           <TabsTrigger value="business">事業管理</TabsTrigger>
           <TabsTrigger value="payment">支払い・分配</TabsTrigger>
           <TabsTrigger value="category">経費カテゴリー</TabsTrigger>
-          <TabsTrigger value="model">モデル/部署</TabsTrigger>
+          <TabsTrigger value="model">部署</TabsTrigger>
         </TabsList>
 
         {/* カテゴリ管理 */}
@@ -541,12 +541,12 @@ export default function SettingsPage() {
           </Card>
         </TabsContent>
 
-        {/* モデル/部署 */}
+        {/* 部署 */}
         <TabsContent value="model">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
-                <CardTitle>モデル/部署一覧</CardTitle>
+                <CardTitle>部署一覧</CardTitle>
                 <CardDescription>事業に紐づく詳細なモデルや部署を管理します</CardDescription>
               </div>
               <Button onClick={() => { setEditingModel(null); setSelectedBusinessForModel(''); setShowModelModal(true); }} disabled={loading}>
@@ -562,7 +562,7 @@ export default function SettingsPage() {
                 <div className="space-y-6">
                   {models.length === 0 ? (
                     <div className="text-center py-4 text-muted-foreground text-sm">
-                      モデル/部署が登録されていません
+                      部署が登録されていません
                     </div>
                   ) : (
                     businesses.map((business) => {
