@@ -32,6 +32,9 @@ ALTER TABLE models ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(i
 -- 振り込みステータステーブル
 ALTER TABLE transfer_statuses ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id);
 
+-- カテゴリテーブル（事業のグループ化用）
+ALTER TABLE categories ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id);
+
 -- インデックスを作成
 CREATE INDEX IF NOT EXISTS idx_businesses_user_id ON businesses(user_id);
 CREATE INDEX IF NOT EXISTS idx_payment_sources_user_id ON payment_sources(user_id);
@@ -43,3 +46,4 @@ CREATE INDEX IF NOT EXISTS idx_assets_user_id ON assets(user_id);
 CREATE INDEX IF NOT EXISTS idx_revenue_distributions_user_id ON revenue_distributions(user_id);
 CREATE INDEX IF NOT EXISTS idx_models_user_id ON models(user_id);
 CREATE INDEX IF NOT EXISTS idx_transfer_statuses_user_id ON transfer_statuses(user_id);
+CREATE INDEX IF NOT EXISTS idx_categories_user_id ON categories(user_id);
