@@ -620,7 +620,7 @@ export default function SettingsPage() {
               <div className="space-y-4">
                 <div>
                   <label className="text-sm font-medium">カテゴリ名 *</label>
-                  <Input name="name" defaultValue={editingCategoryGroup?.name} placeholder="例: MyFans, YouTube" required />
+                  <Input name="name" defaultValue={editingCategoryGroup?.name} placeholder="例: SNS事業, コンサル事業" required />
                 </div>
                 <div>
                   <label className="text-sm font-medium">テーマカラー</label>
@@ -702,7 +702,7 @@ export default function SettingsPage() {
                       <Input 
                         name="category" 
                         defaultValue={editingBusiness?.category || ''} 
-                        placeholder="例: MyFans, YouTube"
+                        placeholder="例: SNS事業, コンサル事業"
                       />
                       <p className="text-xs text-muted-foreground">カテゴリが登録されていない場合は、直接入力してください</p>
                     </div>
