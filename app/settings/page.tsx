@@ -303,6 +303,14 @@ export default function SettingsPage() {
                 <div className="py-8">
                   <LoadingOverlay />
                 </div>
+              ) : businesses.length === 0 ? (
+                <div className="text-center py-12">
+                  <Building2 className="h-12 w-12 text-muted-foreground/30 mx-auto mb-4" />
+                  <p className="text-muted-foreground mb-4">事業が登録されていません</p>
+                  <Button onClick={() => { setEditingBusiness(null); setShowBusinessModal(true); }}>
+                    <Plus className="mr-2 h-4 w-4" /> 事業を追加
+                  </Button>
+                </div>
               ) : (
               <div className="space-y-6">
                 {/* カテゴリごとにグループ化 */}
@@ -339,17 +347,19 @@ export default function SettingsPage() {
                     categoryMap.set('uncategorized', { name: 'その他', businesses: uncategorized });
                   }
                   
-                  // カテゴリを表示順序でソート
-                  const sortedCategories = Array.from(categoryMap.entries()).sort((a, b) => {
-                    const catA = categories.find(c => c.id === a[0]);
-                    const catB = categories.find(c => c.id === b[0]);
-                    if (catA && catB) {
-                      return (catA.displayOrder || 0) - (catB.displayOrder || 0);
-                    }
-                    if (a[0] === 'uncategorized') return 999;
-                    if (b[0] === 'uncategorized') return -999;
-                    return a[1].name.localeCompare(b[1].name);
-                  });
+                  // 事業が1つ以上あるカテゴリのみ表示
+                  const sortedCategories = Array.from(categoryMap.entries())
+                    .filter(([, group]) => group.businesses.length > 0)
+                    .sort((a, b) => {
+                      const catA = categories.find(c => c.id === a[0]);
+                      const catB = categories.find(c => c.id === b[0]);
+                      if (catA && catB) {
+                        return (catA.displayOrder || 0) - (catB.displayOrder || 0);
+                      }
+                      if (a[0] === 'uncategorized') return 999;
+                      if (b[0] === 'uncategorized') return -999;
+                      return a[1].name.localeCompare(b[1].name);
+                    });
                   
                   return sortedCategories.map(([key, group]) => (
                     <div key={key}>
